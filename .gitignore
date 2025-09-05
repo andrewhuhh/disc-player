@@ -1,8 +1,6 @@
 /node_modules
 /dist
 /build
-/public
-/assets
 /package-lock.json
 /package.json
 /server.js
