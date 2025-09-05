@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="assets/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Disc</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .loading-indicator {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 1000;
+        }
+        .loading-indicator.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="record">
+            <div class="record-inner">
+                <div class="record-dot"></div>
+            </div>
+        </div>
+    </div>
+    <div class="drop-zone"></div>
+    <div class="song-info">
+        <h4 class="song-title"></h4>
+        <h4 class="song-author"></h4>
+    </div>
+    <button class="songs-button" aria-label="Open songs"></button>
+    <div class="songs-panel" aria-hidden="true">
+        <div class="songs-list"></div>
+        <div class="add-song" role="button" tabindex="0" aria-label="Add new song">
+            <div class="add-song-button"></div>
+            <input type="text" id="add-song-url" class="add-song-input" placeholder="Paste audio or YouTube link" aria-label="Enter song link">
+        </div>
+    </div>
+    <div class="loading-indicator">Converting YouTube video...</div>
+    <script src="script.js" type="module"></script>
+</body>
+</html>

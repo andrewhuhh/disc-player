@@ -1,0 +1,12 @@
+/node_modules
+/dist
+/build
+/public
+/assets
+/package-lock.json
+/package.json
+/server.js
+/webpack.config.js
+/webpack.config.js.map
+/webpack.config.js.map.gz
+/temp
