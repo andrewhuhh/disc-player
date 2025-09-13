@@ -42,12 +42,47 @@
     <button class="songs-button" aria-label="Open songs"></button>
     <div class="songs-panel" aria-hidden="true">
         <div class="songs-list"></div>
-        <div class="add-song" role="button" tabindex="0" aria-label="Add new song">
-            <div class="add-song-button"></div>
-            <input type="text" id="add-song-url" class="add-song-input" placeholder="Paste audio or YouTube link" aria-label="Enter song link">
+        <div class="add-music-panel" role="button" tabindex="0" aria-label="Add music">
+            <div class="add-music-button">+</div>
+            <div class="add-music-content">
+                <div class="add-music-tabs">
+                    <button class="tab-button active" data-tab="youtube">YouTube</button>
+                    <button class="tab-button" data-tab="ai">AI Generate</button>
+                </div>
+                
+                <div class="tab-content youtube-tab active">
+                    <input type="text" id="add-song-url" class="add-song-input" placeholder="Paste YouTube or audio link..." aria-label="Enter song link">
+                    <button id="add-song-submit" class="add-song-submit-button" type="button">Add Song</button>
+                </div>
+                
+                <div class="tab-content ai-tab">
+                    <form class="ai-generation-form">
+                        <div class="api-key-section">
+                            <input type="password" id="elevenlabs-api-key" class="api-key-input" placeholder="Enter your ElevenLabs API key..." aria-label="ElevenLabs API key" autocomplete="off">
+                            <div class="api-key-info">
+                                <small>Get your API key from <a href="https://elevenlabs.io/speech-synthesis" target="_blank" rel="noopener">ElevenLabs</a></small>
+                            </div>
+                        </div>
+                        <textarea id="music-prompt" class="music-prompt-input" placeholder="Describe the music you want to generate..." aria-label="Enter music description" rows="3"></textarea>
+                        <div class="generate-controls">
+                            <select id="music-length" class="music-length-select" aria-label="Select music length">
+                                <option value="10000">10 seconds</option>
+                                <option value="20000">20 seconds</option>
+                                <option value="30000">30 seconds</option>
+                                <option value="60000">1 minute</option>
+                            </select>
+                            <button id="generate-button" class="generate-button" type="button">Generate</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
         </div>
     </div>
     <div class="loading-indicator">Converting YouTube video...</div>
+    
+    <!-- Error Toast Container -->
+    <div id="error-toast-container" class="error-toast-container"></div>
+    
     <script src="script.js" type="module"></script>
 </body>
 </html>

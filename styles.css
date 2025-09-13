@@ -390,72 +390,6 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Add song button and input */
-.add-song {
-    width: 30px;
-    height: 30px;
-    margin: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 12px;
-    border-radius: 8px;
-    background: rgba(255,255,255,0.1);
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.add-song.input-mode {
-    width: 300px;
-    height: auto;
-    background: transparent;
-}
-
-.add-song:hover {
-    background: rgba(255,255,255,0.18);
-    scale: 1.05;
-    transform-origin: center right;
-}
-
-.add-song.input-mode:hover {
-    scale: 1;
-    background: transparent;
-}
-
-.add-song-button {
-    width: 24px;
-    height: 24px;
-    position: relative;
-    opacity: 0.6;
-    transition: all 0.2s ease;
-}
-
-.add-song-button::before,
-.add-song-button::after {
-    content: '';
-    position: absolute;
-    background: #ffffff;
-    border-radius: 2px;
-}
-
-.add-song-button::before {
-    width: 2px;
-    height: 24px;
-    left: 11px;
-    top: 0;
-}
-
-.add-song-button::after {
-    width: 24px;
-    height: 2px;
-    left: 0;
-    top: 11px;
-}
-
-.add-song:hover .add-song-button {
-    opacity: 1;
-    transform: scale(1.1);
-}
-
 .add-song-input {
     width: 100%;
     padding: 12px;
@@ -466,7 +400,6 @@ h1, h2, h3, h4, h5, h6 {
     font-family: inherit;
     font-size: 12px;
     transition: all 0.2s ease;
-    display: none;
     box-sizing: border-box;
 }
 
@@ -477,15 +410,6 @@ h1, h2, h3, h4, h5, h6 {
 .add-song-input:focus {
     outline: none;
     background: rgba(255,255,255,0.15);
-}
-
-.add-song.input-mode .add-song-button {
-    display: none;
-}
-
-.add-song.input-mode .add-song-input {
-    display: block;
-    width: 100%;
 }
 
 /* Context Menu Styles */
@@ -771,4 +695,475 @@ h1, h2, h3, h4, h5, h6 {
 /* Hide the default file input button */
 .cover-input::-webkit-file-upload-button {
     display: none;
+}
+
+/* Combined Add Music Panel Styles */
+.add-music-panel {
+    width: 30px;
+    height: 30px;
+    margin: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.1);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    z-index: 100;
+}
+
+.add-music-panel.expanded {
+    width: 320px;
+    height: auto;
+    background: rgba(30, 30, 30, 0.95);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.1);
+    flex-direction: column;
+    align-items: stretch;
+    z-index: 1000;
+}
+
+.add-music-panel:hover {
+    background: rgba(255,255,255,0.18);
+    scale: 1.05;
+    transform-origin: center right;
+}
+
+.add-music-panel.expanded:hover {
+    scale: 1;
+    background: rgba(30, 30, 30, 0.95);
+}
+
+.add-music-button {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: bold;
+    opacity: 0.6;
+    transition: all 0.2s ease;
+}
+
+.add-music-panel:hover .add-music-button {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+.add-music-content {
+    display: none;
+    width: 100%;
+    flex-direction: column;
+}
+
+.add-music-panel.expanded .add-music-button {
+    display: none;
+}
+
+.add-music-panel.expanded .add-music-content {
+    display: flex;
+}
+
+.add-music-tabs {
+    display: flex;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 12px;
+}
+
+.tab-button {
+    flex: 1;
+    padding: 8px 16px;
+    background: transparent;
+    border: none;
+    color: rgba(255,255,255,0.6);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-bottom: 2px solid transparent;
+}
+
+.tab-button.active {
+    color: #ffffff;
+    border-bottom-color: rgba(139, 69, 19, 1);
+}
+
+.tab-button:hover {
+    color: rgba(255,255,255,0.8);
+}
+
+.tab-content {
+    display: none;
+    flex-direction: column;
+    cursor: default;
+    gap: 12px;
+}
+
+.tab-content.active {
+    display: flex;
+}
+
+.ai-generation-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: none;
+}
+
+.add-song-submit-button {
+    padding: 8px 16px;
+    border-radius: 6px;
+    background: rgba(139, 69, 19, 0.8);
+    border: none;
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+}
+
+.add-song-submit-button:hover {
+    background: rgba(139, 69, 19, 1);
+    transform: scale(1.05);
+}
+
+.add-song-submit-button:active {
+    transform: scale(0.98);
+}
+
+.add-song-submit-button:disabled {
+    background: rgba(255,255,255,0.1);
+    cursor: not-allowed;
+    transform: none;
+}
+
+.api-key-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.api-key-input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 12px;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+}
+
+.api-key-input::placeholder {
+    color: rgba(255,255,255,0.4);
+}
+
+.api-key-input:focus {
+    outline: none;
+    background: rgba(255,255,255,0.15);
+}
+
+.api-key-info {
+    text-align: center;
+}
+
+.api-key-info small {
+    color: rgba(255,255,255,0.6);
+    font-size: 10px;
+}
+
+.api-key-info a {
+    color: rgba(139, 69, 19, 1);
+    text-decoration: none;
+}
+
+.api-key-info a:hover {
+    text-decoration: underline;
+}
+
+.generate-music.form-mode .generate-music-button {
+    display: none;
+}
+
+.generate-music.form-mode .generate-music-form {
+    display: flex;
+}
+
+.music-prompt-input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 12px;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 60px;
+}
+
+.music-prompt-input::placeholder {
+    color: rgba(255,255,255,0.4);
+}
+
+.music-prompt-input:focus {
+    outline: none;
+    background: rgba(255,255,255,0.15);
+}
+
+.generate-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.music-length-select {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.music-length-select:focus {
+    outline: none;
+    background: rgba(255,255,255,0.15);
+}
+
+.music-length-select option {
+    background: #1b1b1b;
+    color: #ffffff;
+}
+
+.generate-button {
+    padding: 8px 16px;
+    border-radius: 6px;
+    background: rgba(139, 69, 19, 0.8);
+    border: none;
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+}
+
+.generate-button:hover {
+    background: rgba(139, 69, 19, 1);
+    transform: scale(1.05);
+}
+
+.generate-button:active {
+    transform: scale(0.98);
+}
+
+.generate-button:disabled {
+    background: rgba(255,255,255,0.1);
+    cursor: not-allowed;
+    transform: none;
+}
+
+.generate-button:disabled:hover {
+    background: rgba(255,255,255,0.1);
+    transform: none;
+}
+
+/* Error Toast Styles */
+.error-toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    pointer-events: none;
+}
+
+.error-toast {
+    background: rgba(220, 38, 38, 0.95);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 12px;
+    padding: 16px 20px;
+    color: #ffffff;
+    font-family: "Space Mono", monospace;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    max-width: 400px;
+    min-width: 300px;
+    box-shadow: 0 8px 32px rgba(220, 38, 38, 0.3);
+    pointer-events: auto;
+    opacity: 0;
+    transform: translateX(100%) scale(0.9);
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    position: relative;
+    overflow: hidden;
+}
+
+.error-toast.show {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+}
+
+.error-toast.hide {
+    opacity: 0;
+    transform: translateX(100%) scale(0.9);
+    transition: all 0.3s ease-in;
+}
+
+.error-toast::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #ef4444, #dc2626, #b91c1c);
+    border-radius: 12px 12px 0 0;
+}
+
+.error-toast-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.error-toast-icon {
+    font-size: 14px;
+    color: #fecaca;
+}
+
+.error-toast-title {
+    font-weight: 600;
+    color: #fecaca;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}
+
+.error-toast-message {
+    line-height: 1.4;
+    color: #ffffff;
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+
+.error-toast-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
+.error-toast-button {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    letter-spacing: 0.5px;
+}
+
+.error-toast-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+}
+
+.error-toast-button.primary {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.error-toast-button.primary:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.error-toast-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    transition: all 0.2s ease;
+}
+
+.error-toast-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+/* Success Toast Styles */
+.success-toast {
+    background: rgba(34, 197, 94, 0.95);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    box-shadow: 0 8px 32px rgba(34, 197, 94, 0.3);
+}
+
+.success-toast::before {
+    background: linear-gradient(90deg, #22c55e, #16a34a, #15803d);
+}
+
+.success-toast .error-toast-icon {
+    color: #bbf7d0;
+}
+
+.success-toast .error-toast-title {
+    color: #bbf7d0;
+}
+
+/* Warning Toast Styles */
+.warning-toast {
+    background: rgba(245, 158, 11, 0.95);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    box-shadow: 0 8px 32px rgba(245, 158, 11, 0.3);
+}
+
+.warning-toast::before {
+    background: linear-gradient(90deg, #f59e0b, #d97706, #b45309);
+}
+
+.warning-toast .error-toast-icon {
+    color: #fef3c7;
+}
+
+.warning-toast .error-toast-title {
+    color: #fef3c7;
 }

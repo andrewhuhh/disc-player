@@ -14,6 +14,258 @@ let canvasCtx;
 
 // Audio analysis variables (simplified for basic bar visualizer)
 
+// Error Handling System
+class ErrorHandler {
+    constructor() {
+        this.container = document.getElementById('error-toast-container');
+        this.activeToasts = new Set();
+    }
+
+    showError(error, options = {}) {
+        const {
+            title = 'Error',
+            message = 'An unexpected error occurred',
+            type = 'error',
+            duration = 8000,
+            actions = [],
+            showClose = true
+        } = options;
+
+        // Parse error message for better user experience
+        const parsedError = this.parseError(error);
+        const finalMessage = parsedError.message || message;
+        const finalTitle = parsedError.title || title;
+
+        const toast = this.createToast({
+            title: finalTitle,
+            message: finalMessage,
+            type: parsedError.type || type,
+            duration,
+            actions,
+            showClose
+        });
+
+        this.container.appendChild(toast);
+        this.activeToasts.add(toast);
+
+        // Trigger animation
+        requestAnimationFrame(() => {
+            toast.classList.add('show');
+        });
+
+        // Auto-remove after duration
+        if (duration > 0) {
+            setTimeout(() => {
+                this.hideToast(toast);
+            }, duration);
+        }
+
+        return toast;
+    }
+
+    showSuccess(message, options = {}) {
+        return this.showError(null, {
+            title: 'Success',
+            message,
+            type: 'success',
+            duration: 4000,
+            ...options
+        });
+    }
+
+    showWarning(message, options = {}) {
+        return this.showError(null, {
+            title: 'Warning',
+            message,
+            type: 'warning',
+            duration: 6000,
+            ...options
+        });
+    }
+
+    parseError(error) {
+        if (!error) {
+            return { message: 'An unknown error occurred', type: 'error' };
+        }
+
+        // Handle different error types
+        if (typeof error === 'string') {
+            return { message: error, type: 'error' };
+        }
+
+        if (error instanceof Error) {
+            const message = error.message;
+            
+            // ElevenLabs API specific error parsing
+            if (message.includes('Status code: 402')) {
+                return {
+                    title: 'Upgrade Required',
+                    message: 'The Music API requires a paid ElevenLabs plan. Please upgrade your account to generate music.',
+                    type: 'warning',
+                    actions: [
+                        {
+                            text: 'Upgrade Account',
+                            action: () => window.open('https://elevenlabs.io/pricing', '_blank')
+                        }
+                    ]
+                };
+            }
+
+            if (message.includes('Status code: 401') || message.includes('unauthorized')) {
+                return {
+                    title: 'Invalid API Key',
+                    message: 'Please check your ElevenLabs API key and try again.',
+                    type: 'error',
+                    actions: [
+                        {
+                            text: 'Get API Key',
+                            action: () => window.open('https://elevenlabs.io/speech-synthesis', '_blank')
+                        }
+                    ]
+                };
+            }
+
+            if (message.includes('Status code: 403') || message.includes('forbidden')) {
+                return {
+                    title: 'Access Denied',
+                    message: 'Your ElevenLabs account doesn\'t have access to the Music API.',
+                    type: 'error'
+                };
+            }
+
+            if (message.includes('Status code: 429')) {
+                return {
+                    title: 'Rate Limit Exceeded',
+                    message: 'You\'ve hit the rate limit. Please wait a moment before trying again.',
+                    type: 'warning'
+                };
+            }
+
+            if (message.includes('Status code: 500')) {
+                return {
+                    title: 'Server Error',
+                    message: 'ElevenLabs servers are experiencing issues. Please try again later.',
+                    type: 'error'
+                };
+            }
+
+            if (message.includes('NetworkError') || message.includes('Failed to fetch')) {
+                return {
+                    title: 'Connection Error',
+                    message: 'Unable to connect to the server. Please check your internet connection.',
+                    type: 'error'
+                };
+            }
+
+            // Generic error parsing
+            if (message.includes('Invalid API key')) {
+                return {
+                    title: 'Invalid API Key',
+                    message: 'Please check your ElevenLabs API key and try again.',
+                    type: 'error'
+                };
+            }
+
+            if (message.includes('Rate limit exceeded')) {
+                return {
+                    title: 'Rate Limit Exceeded',
+                    message: 'Please wait a moment before trying again.',
+                    type: 'warning'
+                };
+            }
+
+            return { message, type: 'error' };
+        }
+
+        // Handle response objects
+        if (error.detail && error.detail.message) {
+            return {
+                message: error.detail.message,
+                type: error.detail.status === 'limited_access' ? 'warning' : 'error'
+            };
+        }
+
+        if (error.error) {
+            return { message: error.error, type: 'error' };
+        }
+
+        return { message: 'An unexpected error occurred', type: 'error' };
+    }
+
+    createToast({ title, message, type, duration, actions, showClose }) {
+        const toast = document.createElement('div');
+        toast.className = `error-toast ${type}-toast`;
+
+        const icon = this.getIcon(type);
+        
+        toast.innerHTML = `
+            ${showClose ? '<button class="error-toast-close" aria-label="Close">&times;</button>' : ''}
+            <div class="error-toast-header">
+                <span class="error-toast-icon">${icon}</span>
+                <span class="error-toast-title">${title}</span>
+            </div>
+            <div class="error-toast-message">${message}</div>
+            ${actions.length > 0 ? `
+                <div class="error-toast-actions">
+                    ${actions.map(action => 
+                        `<button class="error-toast-button ${action.primary ? 'primary' : ''}" data-action="${action.text}">${action.text}</button>`
+                    ).join('')}
+                </div>
+            ` : ''}
+        `;
+
+        // Add event listeners
+        if (showClose) {
+            const closeBtn = toast.querySelector('.error-toast-close');
+            closeBtn.addEventListener('click', () => this.hideToast(toast));
+        }
+
+        actions.forEach(action => {
+            const btn = toast.querySelector(`[data-action="${action.text}"]`);
+            if (btn) {
+                btn.addEventListener('click', action.action);
+            }
+        });
+
+        return toast;
+    }
+
+    getIcon(type) {
+        const icons = {
+            error: '⚠️',
+            warning: '⚠️',
+            success: '✅',
+            info: 'ℹ️'
+        };
+        return icons[type] || icons.error;
+    }
+
+    hideToast(toast) {
+        if (!toast || !this.activeToasts.has(toast)) return;
+
+        toast.classList.add('hide');
+        this.activeToasts.delete(toast);
+
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        }, 300);
+    }
+
+    clearAll() {
+        this.activeToasts.forEach(toast => {
+            this.hideToast(toast);
+        });
+    }
+}
+
+// Initialize error handler
+const errorHandler = new ErrorHandler();
+
+// Make errorHandler globally available
+window.errorHandler = errorHandler;
+
 // Helper function to extract text content from ID3v2 frames
 const getTextFrameContent = (uint8Array, start, length, encoding) => {
     // Encoding: 0x00 = ISO-8859-1, 0x01 = UTF-16
@@ -1103,14 +1355,342 @@ async function loadSong(recordItem, shouldPlay = true) {
 // Import the InputHandler class
 import InputHandler from './input-handler.js';
 
-// Initialize the input handler
+// Initialize the input handler (but don't set up its default event listeners)
 const inputHandler = new InputHandler();
+// We'll handle the UI interactions ourselves with the new combined interface
 
 // Import the ContextMenu class
 import ContextMenu from './context-menu.js';
 
 // Initialize the context menu
 const contextMenu = new ContextMenu(db);
+
+// Combined add music functionality
+const addMusicPanel = document.querySelector('.add-music-panel');
+const addMusicContent = document.querySelector('.add-music-content');
+const tabButtons = document.querySelectorAll('.tab-button');
+const tabContents = document.querySelectorAll('.tab-content');
+const addSongInput = document.getElementById('add-song-url');
+const addSongSubmitButton = document.getElementById('add-song-submit');
+const musicPromptInput = document.getElementById('music-prompt');
+const musicLengthSelect = document.getElementById('music-length');
+const generateButton = document.getElementById('generate-button');
+const loadingIndicator = document.querySelector('.loading-indicator');
+const apiKeyInput = document.getElementById('elevenlabs-api-key');
+
+// Load saved API key on form open
+async function loadSavedApiKey() {
+    try {
+        const savedApiKey = await getSetting('elevenLabsApiKey');
+        if (savedApiKey && apiKeyInput) {
+            apiKeyInput.value = savedApiKey;
+        }
+    } catch (error) {
+        console.error('Error loading saved API key:', error);
+    }
+}
+
+// Save API key to IndexedDB
+async function saveApiKey(apiKey) {
+    try {
+        await saveSetting('elevenLabsApiKey', apiKey);
+    } catch (error) {
+        console.error('Error saving API key:', error);
+    }
+}
+
+// Toggle add music panel
+if (addMusicPanel) {
+    addMusicPanel.addEventListener('click', async (e) => {
+        // Only toggle if clicking the main button, not the content
+        if (e.target === addMusicPanel || e.target.classList.contains('add-music-button')) {
+            const isExpanded = addMusicPanel.classList.contains('expanded');
+            if (!isExpanded) {
+                addMusicPanel.classList.add('expanded');
+                await loadSavedApiKey();
+                // Focus first input of active tab
+                const activeTab = document.querySelector('.tab-content.active');
+                const firstInput = activeTab.querySelector('input, textarea');
+                if (firstInput) firstInput.focus();
+            } else {
+                addMusicPanel.classList.remove('expanded');
+            }
+        }
+    });
+}
+
+// Prevent panel from closing when clicking inside content
+if (addMusicContent) {
+    addMusicContent.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+}
+
+// Handle tab switching
+tabButtons.forEach(button => {
+    button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const targetTab = button.dataset.tab;
+        
+        // Update active tab button
+        tabButtons.forEach(btn => btn.classList.remove('active'));
+        button.classList.add('active');
+        
+        // Update active tab content
+        tabContents.forEach(content => {
+            content.classList.remove('active');
+            if (content.classList.contains(`${targetTab}-tab`)) {
+                content.classList.add('active');
+                // Focus first input of newly active tab
+                const firstInput = content.querySelector('input, textarea');
+                if (firstInput) firstInput.focus();
+            }
+        });
+    });
+});
+
+// Save API key when user types
+if (apiKeyInput) {
+    apiKeyInput.addEventListener('input', async (e) => {
+        const apiKey = e.target.value.trim();
+        if (apiKey) {
+            await saveApiKey(apiKey);
+        }
+    });
+}
+
+// Handle YouTube/URL submission
+if (addSongSubmitButton) {
+    addSongSubmitButton.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const url = addSongInput.value.trim();
+        if (!url) {
+            errorHandler.showWarning('Please enter a YouTube or audio URL.', {
+                title: 'Input Required',
+                duration: 4000
+            });
+            addSongInput.focus();
+            return;
+        }
+
+        try {
+            // Use the existing input handler functionality
+            if (inputHandler) {
+                if (inputHandler.isYouTubeUrl(url)) {
+                    await inputHandler.handleYouTubeUrl(url);
+                } else {
+                    await inputHandler.handleDirectAudioUrl(url);
+                }
+                
+                // Clear input and close panel
+                addSongInput.value = '';
+                addMusicPanel.classList.remove('expanded');
+                
+                // Close songs panel if open
+                if (songsPanel && songsPanel.classList.contains('open')) {
+                    songsPanel.classList.remove('open');
+                    songsPanel.setAttribute('aria-hidden', 'true');
+                }
+            }
+        } catch (error) {
+            console.error('Error processing URL:', error);
+            errorHandler.showError('Failed to process the URL. Please make sure it\'s a valid audio file link.', {
+                title: 'URL Processing Failed',
+                duration: 6000
+            });
+        }
+    });
+}
+
+// Handle Enter key in URL input
+if (addSongInput) {
+    addSongInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            addSongSubmitButton.click();
+        } else if (e.key === 'Escape') {
+            addSongInput.value = '';
+            addMusicPanel.classList.remove('expanded');
+        }
+    });
+}
+
+// Handle keyboard shortcuts for music generation
+if (musicPromptInput) {
+    musicPromptInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            generateButton.click();
+        } else if (e.key === 'Escape') {
+            musicPromptInput.value = '';
+            addMusicPanel.classList.remove('expanded');
+        }
+    });
+}
+
+// Close panel when clicking outside
+document.addEventListener('click', (e) => {
+    if (addMusicPanel && addMusicPanel.classList.contains('expanded')) {
+        // Check if click is outside the panel
+        if (!addMusicPanel.contains(e.target)) {
+            addMusicPanel.classList.remove('expanded');
+        }
+    }
+});
+
+// Prevent panel from closing when interacting with form elements
+const formElements = document.querySelectorAll('.add-music-content input, .add-music-content textarea, .add-music-content select, .add-music-content button');
+formElements.forEach(element => {
+    element.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+});
+
+// Handle form submission
+const aiGenerationForm = document.querySelector('.ai-generation-form');
+if (aiGenerationForm) {
+    aiGenerationForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        generateButton.click();
+    });
+}
+
+// Handle music generation
+if (generateButton) {
+    generateButton.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const prompt = musicPromptInput.value.trim();
+        const apiKey = apiKeyInput.value.trim();
+        
+        if (!apiKey) {
+            errorHandler.showWarning('Please enter your ElevenLabs API key first.', {
+                title: 'API Key Required',
+                duration: 4000
+            });
+            apiKeyInput.focus();
+            return;
+        }
+        
+        if (!prompt) {
+            errorHandler.showWarning('Please enter a description for the music you want to generate.', {
+                title: 'Description Required',
+                duration: 4000
+            });
+            musicPromptInput.focus();
+            return;
+        }
+
+        const length = parseInt(musicLengthSelect.value);
+        
+        try {
+            // Save API key for future use
+            await saveApiKey(apiKey);
+            
+            // Show loading indicator
+            loadingIndicator.textContent = 'Generating music with AI...';
+            loadingIndicator.classList.add('active');
+            generateButton.disabled = true;
+            generateButton.textContent = 'Generating...';
+
+            const response = await fetch('/api/generate-music', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    prompt: prompt,
+                    length: length,
+                    apiKey: apiKey
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Music generation failed');
+            }
+
+            // Get the generated audio as blob
+            const blob = await response.blob();
+            const file = new File([blob], `generated-${Date.now()}.mp3`, { type: 'audio/mpeg' });
+
+            // Process the generated audio file
+            await processGeneratedMusic(file, prompt);
+
+            // Reset form
+            musicPromptInput.value = '';
+            addMusicPanel.classList.remove('expanded');
+            
+            // Close songs panel if open
+            if (songsPanel && songsPanel.classList.contains('open')) {
+                songsPanel.classList.remove('open');
+                songsPanel.setAttribute('aria-hidden', 'true');
+            }
+
+        } catch (error) {
+            console.error('Music generation error:', error);
+            
+            // Use the new error handling system
+            errorHandler.showError(error, {
+                title: 'Music Generation Failed',
+                duration: 10000
+            });
+        } finally {
+            // Hide loading indicator
+            loadingIndicator.classList.remove('active');
+            generateButton.disabled = false;
+            generateButton.textContent = 'Generate';
+        }
+    });
+}
+
+// Process generated music file
+async function processGeneratedMusic(file, prompt) {
+    try {
+        // Stop any currently playing audio
+        stopAudio();
+
+        // Generate ID and create metadata
+        const id = await computeFileId(file);
+        const gradient = generateRandomGradient();
+
+        // Create title from prompt (first few words)
+        const words = prompt.split(' ').slice(0, 3).join(' ');
+        const title = words.charAt(0).toUpperCase() + words.slice(1).toLowerCase();
+
+        // Store in IndexedDB
+        const audioRecord = {
+            id,
+            file,
+            title: title || 'Generated Music',
+            artist: 'AI Generated',
+            cover: null,
+            gradient: gradient,
+            createdAt: Date.now()
+        };
+        await idbPut('audio', audioRecord);
+
+        // Update UI
+        songTitleElement.textContent = audioRecord.title;
+        songAuthorElement.textContent = audioRecord.artist;
+        await updateRecordAppearance(gradient);
+
+        // Set up audio playback and start playing
+        await setupAudioPlayback(file);
+        handlePlayback();
+
+        // Refresh songs list
+        renderSongs();
+
+        // Show success message
+        errorHandler.showSuccess(`"${title}" has been generated and added to your collection!`, {
+            duration: 5000
+        });
+
+    } catch (error) {
+        console.error('Error processing generated music:', error);
+        throw error;
+    }
+}
 
 // Remove old input handling code
 if (songsButton && songsPanel) {

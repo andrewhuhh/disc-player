@@ -3,7 +3,8 @@ class InputHandler {
     constructor() {
         this.addSongButton = document.querySelector('.add-song');
         this.addSongInput = document.querySelector('.add-song-input');
-        this.setupEventListeners();
+        // Don't set up event listeners automatically - they're handled by the main script now
+        // this.setupEventListeners();
     }
 
     setupEventListeners() {
@@ -41,7 +42,14 @@ class InputHandler {
                 }
             } catch (error) {
                 console.error('Error processing URL:', error);
-                alert('Failed to process the URL. Please make sure it\'s a valid audio file link.');
+                if (window.errorHandler) {
+                    window.errorHandler.showError('Failed to process the URL. Please make sure it\'s a valid audio file link.', {
+                        title: 'URL Processing Failed',
+                        duration: 6000
+                    });
+                } else {
+                    alert('Failed to process the URL. Please make sure it\'s a valid audio file link.');
+                }
             }
         } else if (e.key === 'Escape') {
             this.addSongInput.value = '';
@@ -102,10 +110,25 @@ class InputHandler {
             
             // Use the existing processAudioFile function
             await window.processAudioFile(file);
+            
+            // Show success message
+            if (window.errorHandler) {
+                const title = metadata?.title || 'YouTube Video';
+                window.errorHandler.showSuccess(`"${title}" has been added to your collection!`, {
+                    duration: 5000
+                });
+            }
 
         } catch (error) {
             console.error('YouTube conversion error:', error);
-            alert('Failed to convert YouTube video. Please try again later.');
+            if (window.errorHandler) {
+                window.errorHandler.showError('Failed to convert YouTube video. Please try again later.', {
+                    title: 'YouTube Conversion Failed',
+                    duration: 6000
+                });
+            } else {
+                alert('Failed to convert YouTube video. Please try again later.');
+            }
         } finally {
             const loadingIndicator = document.querySelector('.loading-indicator');
             loadingIndicator.classList.remove('active');
@@ -166,6 +189,13 @@ class InputHandler {
             const filename = url.split('/').pop() || 'audio';
             const file = new File([blob], filename, { type: blob.type });
             await window.processAudioFile(file);
+            
+            // Show success message
+            if (window.errorHandler) {
+                window.errorHandler.showSuccess(`"${filename}" has been added to your collection!`, {
+                    duration: 5000
+                });
+            }
         } catch (error) {
             console.error('Error fetching audio:', error);
             throw error;
