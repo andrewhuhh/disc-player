@@ -47,7 +47,7 @@
             <div class="add-music-content">
                 <div class="add-music-tabs">
                     <button class="tab-button active" data-tab="youtube">YouTube</button>
-                    <button class="tab-button" data-tab="ai">AI Generate</button>
+                    <button class="tab-button" data-tab="ai">Create</button>
                 </div>
                 
                 <div class="tab-content youtube-tab active">
@@ -80,8 +80,61 @@
     </div>
     <div class="loading-indicator">Converting YouTube video...</div>
     
+    <!-- AI Generation Overlay -->
+    <div class="ai-generation-overlay" id="ai-generation-overlay">
+        <div class="ai-generation-content">
+            <div class="ai-generation-text" id="ai-generation-text">brb pestering the music magician</div>
+            <div class="ai-generation-subtext" id="ai-generation-subtext">conjuring your sonic masterpiece...</div>
+            <div class="ai-progress-container">
+                <div class="ai-progress-bar">
+                    <div class="ai-progress-fill" id="ai-progress-fill"></div>
+                </div>
+                <div class="ai-progress-text" id="ai-progress-text">estimated time: 20s</div>
+            </div>
+            <button class="ai-cancel-button" id="ai-cancel-button">Cancel & Try Again</button>
+        </div>
+    </div>
+    
     <!-- Error Toast Container -->
     <div id="error-toast-container" class="error-toast-container"></div>
+    
+    <!-- Delete Confirmation Dialog -->
+    <div class="delete-confirmation-dialog" id="delete-confirmation-dialog">
+        <div class="delete-dialog-content">
+            <div class="delete-dialog-header">
+                <i class="fas fa-exclamation-triangle"></i>
+                <h3>Delete Song</h3>
+            </div>
+            <div class="delete-dialog-message">
+                Are you sure you want to delete "<span id="delete-song-title"></span>" by <span id="delete-song-artist"></span>?
+            </div>
+            <div class="delete-dialog-warning">
+                This action cannot be undone.
+            </div>
+            <div class="delete-dialog-buttons">
+                <button class="delete-cancel-btn">Cancel</button>
+                <button class="delete-confirm-btn">Delete</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Progress Bar -->
+    <div class="progress-bar-container">
+        <div class="progress-time-indicator progress-time-current">0:00</div>
+        <button class="progress-control-button play-pause-button" aria-label="Play/Pause">
+            <i class="fas fa-play"></i>
+        </button>
+        <div class="progress-bar">
+            <div class="progress-bar-track">
+                <div class="progress-bar-fill"></div>
+                <div class="progress-bar-handle"></div>
+            </div>
+        </div>
+        <button class="progress-control-button next-track-button" aria-label="Next Track">
+            <i class="fas fa-step-forward"></i>
+        </button>
+        <div class="progress-time-indicator progress-time-total">0:00</div>
+    </div>
     
     <script src="script.js" type="module"></script>
 </body>

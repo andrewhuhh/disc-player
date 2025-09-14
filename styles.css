@@ -236,6 +236,149 @@ h1, h2, h3, h4, h5, h6 {
     pointer-events: none;
 }
 
+/* Progress Bar Styles */
+.progress-bar-container {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    z-index: 1001;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(10px);
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.progress-bar-container.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0);
+}
+
+/* Always show on mobile */
+@media (max-width: 768px), (hover: none) {
+    .progress-bar-container {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+.progress-time-indicator {
+    font-family: "Space Mono", monospace;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 600;
+    text-transform: uppercase;
+    min-width: 32px;
+    text-align: center;
+}
+
+.progress-bar {
+    flex: 1;
+    min-width: 200px;
+    max-width: 400px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 4px 0;
+    margin: 0 4px;
+}
+
+.progress-bar-track {
+    position: relative;
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+    overflow: visible;
+    transition: height 0.2s ease;
+}
+
+.progress-bar:hover .progress-bar-fill {
+    background: linear-gradient(90deg, #4ECDC4, #45B7D1);
+}
+
+.progress-bar-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.705);
+    border-radius: 2px;
+    width: 0%;
+    /* Remove transition for smooth requestAnimationFrame updates */
+}
+
+.progress-bar-handle {
+    position: absolute;
+    top: 50%;
+    left: 0%;
+    transform: translate(-50%, -50%);
+    width: 12px;
+    height: 12px;
+    background: #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    transition: none;
+    cursor: grab;
+    z-index: 10;
+}
+
+.progress-bar:hover .progress-bar-handle {
+    opacity: 1;
+}
+
+.progress-bar-handle:active {
+    cursor: grabbing;
+    transform: translate(-50%, -50%) scale(1.2);
+}
+
+.progress-bar-handle.dragging {
+    opacity: 1;
+    cursor: grabbing;
+    transform: translate(-50%, -50%) scale(1.2);
+}
+
+/* Progress Control Buttons */
+.progress-control-button {
+    background-color: transparent;
+    border: none;
+    width: 24px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    margin-top: 1px;
+}
+
+.progress-control-button:hover {
+    color: #ffffff;
+    transform: scale(1.05);
+}
+
+.progress-control-button:active {
+    transform: scale(0.95);
+}
+
+.play-pause-button.playing i {
+    transform: translateX(-1px); /* Slight adjustment for pause icon centering */
+}
+
 /* Songs button (folder icon) */
 .songs-button {
     position: fixed;
@@ -292,7 +435,6 @@ h1, h2, h3, h4, h5, h6 {
     position: fixed;
     bottom: 90px;
     right: 24px;
-    max-height: calc(100vh - 120px);
     overflow: hidden;
     opacity: 0;
     display: none;
@@ -314,6 +456,7 @@ h1, h2, h3, h4, h5, h6 {
 .songs-list {
     display: flex;
     flex-direction: column;
+    max-height: calc(100vh - 220px);
     gap: 12px;
 }
 
@@ -418,7 +561,7 @@ h1, h2, h3, h4, h5, h6 {
     background: #1b1b1b1c;
     backdrop-filter: blur(20px);
     border: 1px solid #ffffff1c;
-    border-radius: 8px;
+    border-radius: 10px;
     min-width: 180px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     display: none;
@@ -455,7 +598,7 @@ h1, h2, h3, h4, h5, h6 {
 .context-menu-separator {
     height: 1px;
     background-color: #ffffff1c;
-    margin: 4px 0;
+    margin: 1px 0;
 }
 
 /* Edit Dialog Styles */
@@ -1166,4 +1309,242 @@ h1, h2, h3, h4, h5, h6 {
 
 .warning-toast .error-toast-title {
     color: #fef3c7;
+}
+
+/* AI Generation Overlay */
+.ai-generation-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    backdrop-filter: blur(15px) saturate(1.2);
+    -webkit-backdrop-filter: blur(15px) saturate(1.2);
+    user-select: none;
+}
+
+.ai-generation-overlay.active {
+    display: flex;
+    opacity: 1;
+}
+
+.ai-generation-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    max-width: 400px;
+    padding: 40px;
+}
+
+.ai-generation-text {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.ai-generation-subtext {
+    font-size: 14px;
+    opacity: 0.7;
+    margin-bottom: 30px;
+    text-transform: none;
+    letter-spacing: 1px;
+}
+
+.ai-progress-container {
+    width: 300px;
+    margin-bottom: 30px;
+}
+
+.ai-progress-bar {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+.ai-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4ECDC4, #45B7D1);
+    width: 0%;
+    transition: width 0.3s ease;
+    border-radius: 2px;
+}
+
+.ai-progress-text {
+    font-size: 12px;
+    opacity: 0.6;
+    text-align: center;
+}
+
+.ai-cancel-button {
+    background: rgba(220, 38, 38, 0.2);
+    border: 1px solid rgba(220, 38, 38, 0.4);
+    color: #ffffff;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-family: "Space Mono", monospace;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: none;
+}
+
+.ai-cancel-button:hover {
+    background: rgba(220, 38, 38, 0.3);
+    border-color: rgba(220, 38, 38, 0.6);
+    transform: translateY(-1px);
+}
+
+.ai-cancel-button.visible {
+    display: block;
+}
+
+/* Delete Confirmation Dialog Styles */
+.delete-confirmation-dialog {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100002;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    backdrop-filter: blur(10px);
+}
+
+.delete-confirmation-dialog.active {
+    display: flex;
+    opacity: 1;
+}
+
+.delete-dialog-content {
+    background: #1b1b1b;
+    border: 1px solid #ffffff1c;
+    font-family: "Space Mono", monospace;
+    backdrop-filter: blur(20px);
+    border-radius: 12px;
+    padding: 24px;
+    width: 90%;
+    max-width: 400px;
+    box-sizing: border-box;
+    opacity: 0;
+    transform: scale(0.9) translateY(20px);
+    animation: deleteDialogIntro 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes deleteDialogIntro {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.delete-dialog-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.delete-dialog-header i {
+    color: #ff4444;
+    font-size: 20px;
+}
+
+.delete-dialog-header h3 {
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.delete-dialog-message {
+    color: #ffffff;
+    font-size: 14px;
+    line-height: 1.5;
+    margin-bottom: 12px;
+}
+
+.delete-dialog-message span {
+    color: #ff4444;
+    font-weight: 600;
+}
+
+.delete-dialog-warning {
+    color: #ff4444;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 24px;
+    opacity: 0.8;
+}
+
+.delete-dialog-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.delete-dialog-buttons button {
+    padding: 10px 20px;
+    border-radius: 6px;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 80px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-family: "Space Mono", monospace;
+}
+
+.delete-cancel-btn {
+    background: #3a3a3a;
+    color: #ffffff;
+}
+
+.delete-cancel-btn:hover {
+    background: #4a4a4a;
+    transform: scale(1.05);
+}
+
+.delete-confirm-btn {
+    background: #ff4444;
+    color: #ffffff;
+}
+
+.delete-confirm-btn:hover {
+    background: #ff3333;
+    transform: scale(1.05);
+}
+
+.delete-confirm-btn:active {
+    transform: scale(0.98);
 }

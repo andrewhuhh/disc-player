@@ -84,17 +84,7 @@ export default class ContextMenu {
                 break;
 
             case 'delete':
-                if (confirm('Are you sure you want to delete this song?')) {
-                    try {
-                        const tx = window.db.transaction(['audio'], 'readwrite');
-                        const store = tx.objectStore('audio');
-                        await store.delete(songData.id);
-                        // Refresh the songs list
-                        await window.renderSongs();
-                    } catch (error) {
-                        console.error('Error deleting song:', error);
-                    }
-                }
+                this.showDeleteConfirmation(songData);
                 break;
         }
     }
@@ -218,5 +208,76 @@ export default class ContextMenu {
                 cleanup();
             }
         });
+    }
+
+    showDeleteConfirmation = (songData) => {
+        const dialog = document.getElementById('delete-confirmation-dialog');
+        const titleElement = document.getElementById('delete-song-title');
+        const artistElement = document.getElementById('delete-song-artist');
+        const cancelBtn = dialog.querySelector('.delete-cancel-btn');
+        const confirmBtn = dialog.querySelector('.delete-confirm-btn');
+
+        // Update dialog content with song information
+        titleElement.textContent = songData.title || 'UNKNOWN';
+        artistElement.textContent = songData.artist || 'UNNAMED';
+
+        // Show the dialog
+        dialog.classList.add('active');
+
+        // Remove existing event listeners to prevent duplicates
+        const newCancelBtn = cancelBtn.cloneNode(true);
+        const newConfirmBtn = confirmBtn.cloneNode(true);
+        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+        confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+
+        // Add event listeners
+        newCancelBtn.addEventListener('click', () => {
+            dialog.classList.remove('active');
+        });
+
+        newConfirmBtn.addEventListener('click', async () => {
+            try {
+                const tx = window.db.transaction(['audio'], 'readwrite');
+                const store = tx.objectStore('audio');
+                await store.delete(songData.id);
+                
+                // Refresh the songs list
+                await window.renderSongs();
+                
+                // Close the dialog
+                dialog.classList.remove('active');
+                
+                // Show success message
+                if (window.errorHandler) {
+                    window.errorHandler.showSuccess(`"${songData.title || 'Song'}" deleted successfully.`, {
+                        duration: 3000
+                    });
+                }
+            } catch (error) {
+                console.error('Error deleting song:', error);
+                if (window.errorHandler) {
+                    window.errorHandler.showError('Failed to delete song. Please try again.', {
+                        title: 'Delete Failed',
+                        duration: 5000
+                    });
+                }
+            }
+        });
+
+        // Close dialog when clicking outside
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) {
+                dialog.classList.remove('active');
+            }
+        });
+
+        // Close dialog with Escape key
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                dialog.classList.remove('active');
+                document.removeEventListener('keydown', handleEscape);
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
     }
 } 

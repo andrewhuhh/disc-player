@@ -33,6 +33,13 @@ class ErrorHandler {
 
         // Parse error message for better user experience
         const parsedError = this.parseError(error);
+        
+        // If parseError returns null, skip showing the toast (likely null/undefined error)
+        if (!parsedError) {
+            console.log('Skipping error toast for null/undefined error');
+            return null;
+        }
+        
         const finalMessage = parsedError.message || message;
         const finalTitle = parsedError.title || title;
 
@@ -85,7 +92,9 @@ class ErrorHandler {
 
     parseError(error) {
         if (!error) {
-            return { message: 'An unknown error occurred', type: 'error' };
+            // Log this case to help debug when null/undefined errors are passed
+            console.warn('ErrorHandler.parseError called with null/undefined error');
+            return null; // Return null to indicate we should skip showing a toast
         }
 
         // Handle different error types
@@ -133,6 +142,14 @@ class ErrorHandler {
                 };
             }
 
+            if (message.includes('Status code: 400')) {
+                return {
+                    title: 'Invalid Request',
+                    message: 'There was an issue with your request. Please check your prompt and try again.',
+                    type: 'error'
+                };
+            }
+
             if (message.includes('Status code: 429')) {
                 return {
                     title: 'Rate Limit Exceeded',
@@ -166,6 +183,15 @@ class ErrorHandler {
                 };
             }
 
+            // Handle ElevenLabs TOS violation messages
+            if (message.includes('violated our Terms of Service') || message.includes('bad_prompt')) {
+                return {
+                    title: 'Content Policy Violation',
+                    message: 'Your prompt appears to have violated our Terms of Service. Please try again with a different prompt.',
+                    type: 'warning'
+                };
+            }
+
             if (message.includes('Rate limit exceeded')) {
                 return {
                     title: 'Rate Limit Exceeded',
@@ -177,7 +203,47 @@ class ErrorHandler {
             return { message, type: 'error' };
         }
 
-        // Handle response objects
+        // Handle response objects from server
+        if (error.type) {
+            let result = {
+                message: error.message || error.error || 'An error occurred',
+                type: error.type === 'api_error' ? 'error' : error.type
+            };
+
+            // Handle specific error types from server
+            if (error.type === 'bad_prompt') {
+                result.title = 'Content Policy Violation';
+                result.message = 'Your prompt appears to have violated our Terms of Service. Please try again with a different prompt.';
+                result.type = 'warning';
+                
+                // Add prompt suggestion if available
+                if (error.promptSuggestion) {
+                    result.actions = [
+                        {
+                            text: 'Use Suggested Prompt',
+                            primary: true,
+                            action: () => {
+                                const musicPromptInput = document.getElementById('music-prompt');
+                                if (musicPromptInput) {
+                                    musicPromptInput.value = error.promptSuggestion;
+                                    musicPromptInput.focus();
+                                }
+                            }
+                        }
+                    ];
+                }
+            } else if (error.type === 'limited_access') {
+                result.title = 'Access Limited';
+                result.type = 'warning';
+            } else if (error.statusCode === 400) {
+                result.title = 'Invalid Request';
+                result.type = 'error';
+            }
+
+            return result;
+        }
+
+        // Legacy response object handling
         if (error.detail && error.detail.message) {
             return {
                 message: error.detail.message,
@@ -265,6 +331,45 @@ const errorHandler = new ErrorHandler();
 
 // Make errorHandler globally available
 window.errorHandler = errorHandler;
+
+// Global error handler for unhandled errors
+window.addEventListener('error', (event) => {
+    console.error('Unhandled error:', event.error);
+    errorHandler.showError(event.error, {
+        title: 'Unexpected Error',
+        message: 'An unexpected error occurred. Please try again.',
+        type: 'error',
+        duration: 10000
+    });
+});
+
+// Global handler for unhandled promise rejections
+window.addEventListener('unhandledrejection', (event) => {
+    console.error('Unhandled promise rejection:', event.reason);
+    console.log('Event object:', event);
+    console.log('Reason type:', typeof event.reason);
+    console.log('Reason value:', event.reason);
+    
+    // Only show error toast for actual errors, not for expected cases like autoplay failures
+    const reason = event.reason;
+    if (reason && (
+        (reason.message && reason.message.includes('play')) ||
+        (typeof reason === 'string' && reason.includes('play'))
+    )) {
+        // Likely an autoplay failure, just log it and prevent default browser behavior
+        console.warn('Suppressed autoplay-related promise rejection:', reason);
+        event.preventDefault();
+        return;
+    }
+    
+    errorHandler.showError(event.reason, {
+        title: 'Request Failed',
+        message: 'A request failed unexpectedly. Please try again.',
+        type: 'error',
+        duration: 10000
+    });
+    event.preventDefault(); // Prevent the default browser behavior
+});
 
 // Helper function to extract text content from ID3v2 frames
 const getTextFrameContent = (uint8Array, start, length, encoding) => {
@@ -472,6 +577,10 @@ async function setDefaultState() {
     songTitleElement.textContent = 'NO SONGS';
     songAuthorElement.textContent = 'Drop a song to begin';
     await updateRecordAppearance();
+    // Hide progress bar when no songs
+    if (progressBarContainer) {
+        progressBarContainer.classList.remove('visible');
+    }
 }
 
 // Load initial song (last played or first available)
@@ -524,6 +633,18 @@ const songsButton = document.querySelector('.songs-button');
 const songsPanel = document.querySelector('.songs-panel');
 const songsList = document.querySelector('.songs-list');
 let songCoverObjectUrls = [];
+let currentRecordCoverUrl = null; // Track the current record's cover URL separately
+
+// Progress Bar Elements
+const progressBarContainer = document.querySelector('.progress-bar-container');
+const progressBar = document.querySelector('.progress-bar');
+const progressBarTrack = document.querySelector('.progress-bar-track');
+const progressBarFill = document.querySelector('.progress-bar-fill');
+const progressBarHandle = document.querySelector('.progress-bar-handle');
+const progressTimeCurrentElement = document.querySelector('.progress-time-current');
+const progressTimeTotalElement = document.querySelector('.progress-time-total');
+const playPauseButton = document.querySelector('.play-pause-button');
+const nextTrackButton = document.querySelector('.next-track-button');
 
 // Set up canvas for visualization
 canvas = document.createElement('canvas');
@@ -572,6 +693,12 @@ let mouseDownTime = 0; // Track when mouse was pressed
 let mouseStartX = 0; // Track initial mouse position
 let mouseStartY = 0;
 let isScrubbing = false; // Track if we're actually scrubbing vs clicking
+
+// Progress Bar state
+let isProgressBarDragging = false;
+let progressBarRect;
+let progressBarWasPlaying = false;
+let progressAnimationId = null;
 
 // Add frame rate control variables
 let lastDrawTime = 0;
@@ -777,6 +904,12 @@ async function processAudioFile(file) {
     try {
         // Stop any currently playing audio
         stopAudio();
+        
+        // Clean up any existing record cover URL
+        if (currentRecordCoverUrl && currentRecordCoverUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(currentRecordCoverUrl);
+            currentRecordCoverUrl = null;
+        }
 
         // Compute ID and extract metadata
         const [id, metadata] = await Promise.all([
@@ -803,6 +936,7 @@ async function processAudioFile(file) {
         songTitleElement.textContent = metadata.title || 'UNKNOWN';
         songAuthorElement.textContent = metadata.artist || 'UNNAMED';
         if (metadata.coverUrl) {
+            setCurrentRecordCover(metadata.coverUrl);
             updateRecordAppearance(metadata.coverUrl);
         } else if (gradient) {
             updateRecordAppearance(gradient);
@@ -948,6 +1082,8 @@ async function setupAudioPlayback(file) {
         currentAudio.addEventListener('ended', async () => {
             isPlaying = false;
             stopRotation();
+            stopProgressBarAnimation();
+            updatePlayPauseButton();
             
             // Get and play next song
             const currentId = await getSetting('lastPlayedId');
@@ -960,6 +1096,13 @@ async function setupAudioPlayback(file) {
         
         currentAudio.addEventListener('loadeddata', () => {
             console.log('Audio loaded and ready to play');
+            // Update progress bar when audio is loaded
+            updateProgressBar();
+        });
+        
+        // Update progress bar on metadata load (for duration)
+        currentAudio.addEventListener('loadedmetadata', () => {
+            updateProgressBar();
         });
         
     } catch (error) {
@@ -982,11 +1125,15 @@ async function handlePlayback() {
             currentAudio.pause();
             isPlaying = false;
             stopRotation();
+            stopProgressBarAnimation();
+            updatePlayPauseButton();
         } else {
             // Play the audio
             await currentAudio.play();
             isPlaying = true;
             startRotation();
+            startProgressBarAnimation();
+            updatePlayPauseButton();
             // Force initial visualization frame
             drawVisualization(true);
         }
@@ -1017,6 +1164,24 @@ function stopAudio() {
         currentAudio.pause();
         isPlaying = false;
         stopRotation();
+        stopProgressBarAnimation();
+        updatePlayPauseButton();
+    }
+}
+
+// Update play/pause button icon
+function updatePlayPauseButton() {
+    if (!playPauseButton) return;
+    
+    const icon = playPauseButton.querySelector('i');
+    if (!icon) return;
+    
+    if (isPlaying) {
+        icon.className = 'fas fa-pause';
+        playPauseButton.classList.add('playing');
+    } else {
+        icon.className = 'fas fa-play';
+        playPauseButton.classList.remove('playing');
     }
 }
 
@@ -1024,13 +1189,13 @@ function stopAudio() {
 
 // Simple center-split mirrored bar visualizer at the bottom
 function drawVisualization(forceDraw = false) {
-    if (!analyzer || (!isPlaying && !isScrubbing)) return;
+    if (!analyzer || (!isPlaying && !isScrubbing && !isProgressBarDragging)) return;
 
     const currentTime = performance.now();
     const deltaTime = currentTime - lastDrawTime;
     
     // Apply frame rate limiting
-    const targetInterval = isScrubbing ? FRAME_INTERVAL : NORMAL_FRAME_INTERVAL;
+    const targetInterval = (isScrubbing || isProgressBarDragging) ? FRAME_INTERVAL : NORMAL_FRAME_INTERVAL;
     if (!forceDraw && deltaTime < targetInterval) {
         requestAnimationFrame(() => drawVisualization());
         return;
@@ -1125,6 +1290,90 @@ function generateRandomGradient() {
     return `linear-gradient(${angle}deg, ${color1}, ${color2})`;
 }
 
+// Progress Bar utility functions
+function formatTime(seconds) {
+    if (isNaN(seconds) || !isFinite(seconds)) return '0:00';
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+function updateProgressBar() {
+    if (!currentAudio || !currentAudio.duration) {
+        progressBarContainer.classList.remove('visible');
+        stopProgressBarAnimation();
+        return;
+    }
+    
+    // Show progress bar when audio is loaded
+    progressBarContainer.classList.add('visible');
+    
+    // Update time displays
+    progressTimeCurrentElement.textContent = formatTime(currentAudio.currentTime);
+    progressTimeTotalElement.textContent = formatTime(currentAudio.duration);
+    
+    // Update progress fill and handle position (only if not dragging)
+    if (!isProgressBarDragging) {
+        const progress = (currentAudio.currentTime / currentAudio.duration) * 100;
+        updateProgressVisuals(progress);
+    }
+}
+
+function updateProgressVisuals(progress) {
+    // Update both fill and handle simultaneously to prevent desync
+    const clampedProgress = Math.max(0, Math.min(100, progress));
+    progressBarFill.style.width = `${clampedProgress}%`;
+    progressBarHandle.style.left = `${clampedProgress}%`;
+}
+
+function startProgressBarAnimation() {
+    if (progressAnimationId) return; // Already animating
+    
+    function animateProgress() {
+        if (currentAudio && currentAudio.duration && isPlaying && !isProgressBarDragging) {
+            updateProgressBar();
+        }
+        
+        if (isPlaying) {
+            progressAnimationId = requestAnimationFrame(animateProgress);
+        } else {
+            progressAnimationId = null;
+        }
+    }
+    
+    progressAnimationId = requestAnimationFrame(animateProgress);
+}
+
+function stopProgressBarAnimation() {
+    if (progressAnimationId) {
+        cancelAnimationFrame(progressAnimationId);
+        progressAnimationId = null;
+    }
+}
+
+function setProgressBarTime(percentage) {
+    if (!currentAudio || !currentAudio.duration) return;
+    
+    const clampedPercentage = Math.max(0, Math.min(100, percentage));
+    const newTime = (clampedPercentage / 100) * currentAudio.duration;
+    currentAudio.currentTime = Math.max(0, Math.min(newTime, currentAudio.duration));
+    
+    // Update visuals immediately and synchronously
+    updateProgressVisuals(clampedPercentage);
+    progressTimeCurrentElement.textContent = formatTime(currentAudio.currentTime);
+    
+    // Sync record rotation with progress bar scrubbing
+    // Calculate rotation based on time: TIME_PER_ROTATION = 5 seconds
+    const TIME_PER_ROTATION = 5;
+    const rotationsFromTime = currentAudio.currentTime / TIME_PER_ROTATION;
+    const newRotationAngle = (rotationsFromTime * 360) % 360;
+    
+    // Update record rotation
+    rotationAngle = newRotationAngle;
+    record.style.setProperty('--record-rotation', `${rotationAngle}deg`);
+    recordInner.style.transform = `rotate(${rotationAngle}deg)`;
+}
+
 // Handle scrubbing functionality
 function handleScrubStart(e) {
     e.preventDefault();
@@ -1165,6 +1414,7 @@ function handleScrubbing(e) {
             if (isPlaying) {
                 isPlaying = false;
                 stopRotation();
+                stopProgressBarAnimation();
             }
         } else {
             return; // Not scrubbing yet
@@ -1202,6 +1452,13 @@ function handleScrubbing(e) {
     record.style.setProperty('--record-rotation', `${rotationAngle}deg`);
     recordInner.style.transform = `rotate(${rotationAngle}deg)`;
 
+    // Update progress bar to sync with record scrubbing
+    if (currentAudio.duration) {
+        const progress = (currentAudio.currentTime / currentAudio.duration) * 100;
+        updateProgressVisuals(progress);
+        progressTimeCurrentElement.textContent = formatTime(currentAudio.currentTime);
+    }
+
     // Update last angle for next calculation
     lastAngle = currentAngle;
 
@@ -1222,6 +1479,8 @@ function handleScrubEnd(e) {
             currentAudio.play().then(() => {
                 isPlaying = true;
                 startRotation();
+                startProgressBarAnimation();
+                updatePlayPauseButton();
                 // Restart visualization
                 drawVisualization();
             }).catch(err => console.error('Error resuming playback:', err));
@@ -1231,10 +1490,220 @@ function handleScrubEnd(e) {
     isScrubbing = false;
 }
 
+// Progress Bar scrubbing handlers
+function handleProgressBarMouseDown(e) {
+    e.preventDefault();
+    if (!currentAudio || !currentAudio.duration) return;
+    
+    isProgressBarDragging = true;
+    progressBarWasPlaying = isPlaying;
+    progressBarRect = progressBarTrack.getBoundingClientRect();
+    
+    // Add dragging class for visual feedback
+    progressBarHandle.classList.add('dragging');
+    
+    // Pause audio during scrubbing but keep visualizer running
+    if (isPlaying) {
+        currentAudio.pause();
+        isPlaying = false;
+        stopRotation();
+        stopProgressBarAnimation();
+        // Don't update play/pause button during scrubbing to avoid visual flicker
+    }
+    
+    // Calculate and set initial position
+    const percentage = Math.max(0, Math.min(100, ((e.clientX - progressBarRect.left) / progressBarRect.width) * 100));
+    setProgressBarTime(percentage);
+    
+    // Start visualizer for scrubbing feedback
+    drawVisualization(true);
+    
+    // Add global event listeners
+    document.addEventListener('mousemove', handleProgressBarMouseMove);
+    document.addEventListener('mouseup', handleProgressBarMouseUp);
+}
+
+function handleProgressBarMouseMove(e) {
+    e.preventDefault();
+    if (!isProgressBarDragging || !currentAudio || !currentAudio.duration) return;
+    
+    const percentage = Math.max(0, Math.min(100, ((e.clientX - progressBarRect.left) / progressBarRect.width) * 100));
+    
+    // Update visuals immediately for responsive feedback
+    updateProgressVisuals(percentage);
+    
+    // Update audio time and other sync operations
+    const newTime = (percentage / 100) * currentAudio.duration;
+    currentAudio.currentTime = Math.max(0, Math.min(newTime, currentAudio.duration));
+    progressTimeCurrentElement.textContent = formatTime(currentAudio.currentTime);
+    
+    // Sync record rotation
+    const TIME_PER_ROTATION = 5;
+    const rotationsFromTime = currentAudio.currentTime / TIME_PER_ROTATION;
+    const newRotationAngle = (rotationsFromTime * 360) % 360;
+    rotationAngle = newRotationAngle;
+    record.style.setProperty('--record-rotation', `${rotationAngle}deg`);
+    recordInner.style.transform = `rotate(${rotationAngle}deg)`;
+    
+    // Keep visualizer running during scrubbing
+    drawVisualization(true);
+}
+
+function handleProgressBarMouseUp(e) {
+    e.preventDefault();
+    if (!isProgressBarDragging) return;
+    
+    isProgressBarDragging = false;
+    progressBarHandle.classList.remove('dragging');
+    
+    // Resume playback if it was playing before
+    if (progressBarWasPlaying && currentAudio) {
+        currentAudio.play().then(() => {
+            isPlaying = true;
+            startRotation();
+            startProgressBarAnimation();
+            updatePlayPauseButton();
+            // Restart visualizer after scrubbing
+            drawVisualization(true);
+        }).catch(err => console.error('Error resuming playback:', err));
+    }
+    
+    // Remove global event listeners
+    document.removeEventListener('mousemove', handleProgressBarMouseMove);
+    document.removeEventListener('mouseup', handleProgressBarMouseUp);
+}
+
+// Add progress bar event listeners
+if (progressBar) {
+    progressBar.addEventListener('mousedown', handleProgressBarMouseDown);
+}
+
+// Add play/pause button functionality
+if (playPauseButton) {
+    playPauseButton.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await handlePlayback();
+    });
+}
+
+// Add next track button functionality
+if (nextTrackButton) {
+    nextTrackButton.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        if (!currentAudio) return;
+        
+        // Get current song ID and find next song
+        const currentId = await getSetting('lastPlayedId');
+        const nextSong = await getNextSong(currentId);
+        
+        if (nextSong) {
+            await loadSong(nextSong, true); // Load and play the next song
+        } else {
+            // If no next song, could show a message or restart from first song
+            console.log('No next song available');
+        }
+    });
+}
+
+// Progress bar hover behavior for desktop
+let progressBarHideTimer = null;
+let isMobile = false;
+
+// Detect if device is mobile or doesn't support hover
+function checkIfMobile() {
+    return window.innerWidth <= 768 || !window.matchMedia('(hover: hover)').matches;
+}
+
+// Update mobile status on resize
+window.addEventListener('resize', () => {
+    isMobile = checkIfMobile();
+    updateProgressBarVisibility();
+});
+
+// Initialize mobile detection
+isMobile = checkIfMobile();
+
+// Mouse move handler for progress bar visibility
+function handleMouseMove(e) {
+    if (isMobile) return; // Don't handle on mobile
+    
+    const windowHeight = window.innerHeight;
+    const bottomThird = windowHeight * (2/3); // Show when mouse is in bottom 1/3
+    
+    if (e.clientY > bottomThird) {
+        showProgressBar();
+    } else {
+        scheduleHideProgressBar();
+    }
+}
+
+// Show progress bar
+function showProgressBar() {
+    if (isMobile) return; // Mobile always shows via CSS
+    
+    if (progressBarHideTimer) {
+        clearTimeout(progressBarHideTimer);
+        progressBarHideTimer = null;
+    }
+    
+    if (progressBarContainer) {
+        progressBarContainer.classList.add('visible');
+    }
+}
+
+// Schedule hiding progress bar
+function scheduleHideProgressBar() {
+    if (isMobile) return; // Mobile always shows via CSS
+    
+    if (progressBarHideTimer) {
+        clearTimeout(progressBarHideTimer);
+    }
+    
+    progressBarHideTimer = setTimeout(() => {
+        if (progressBarContainer) {
+            progressBarContainer.classList.remove('visible');
+        }
+        progressBarHideTimer = null;
+    }, 1000); // Hide after 1 second of no mouse movement in area
+}
+
+// Update progress bar visibility based on mobile status
+function updateProgressBarVisibility() {
+    if (!progressBarContainer) return;
+    
+    if (isMobile) {
+        // Mobile: always show, remove event listeners
+        progressBarContainer.classList.add('visible');
+        document.removeEventListener('mousemove', handleMouseMove);
+        if (progressBarHideTimer) {
+            clearTimeout(progressBarHideTimer);
+            progressBarHideTimer = null;
+        }
+    } else {
+        // Desktop: add mouse move listener, initially hidden
+        document.addEventListener('mousemove', handleMouseMove);
+        progressBarContainer.classList.remove('visible');
+    }
+}
+
+// Initialize progress bar visibility
+updateProgressBarVisibility();
+
 // Songs UI logic
 function clearSongObjectUrls() {
     songCoverObjectUrls.forEach(url => URL.revokeObjectURL(url));
     songCoverObjectUrls = [];
+}
+
+function setCurrentRecordCover(coverUrl) {
+    // Clean up previous record cover URL if it exists
+    if (currentRecordCoverUrl && currentRecordCoverUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(currentRecordCoverUrl);
+    }
+    currentRecordCoverUrl = coverUrl;
 }
 
 async function renderSongs() {
@@ -1328,7 +1797,7 @@ async function loadSong(recordItem, shouldPlay = true) {
         // Handle background image
         if (recordItem.cover instanceof Blob) {
             const coverUrl = URL.createObjectURL(recordItem.cover);
-            songCoverObjectUrls.push(coverUrl);
+            setCurrentRecordCover(coverUrl); // Use proper management instead of adding to song list URLs
             await updateRecordAppearance(coverUrl);
             // Don't store blob URLs in lastCoverUrl anymore
         } else {
@@ -1555,10 +2024,138 @@ if (aiGenerationForm) {
     });
 }
 
+// AI Generation State Management
+let aiGenerationState = {
+    isGenerating: false,
+    startTime: null,
+    estimatedDuration: 0,
+    progressInterval: null,
+    timeoutId: null,
+    abortController: null
+};
+
+// AI Generation DOM Elements
+const aiOverlay = document.getElementById('ai-generation-overlay');
+const aiText = document.getElementById('ai-generation-text');
+const aiSubtext = document.getElementById('ai-generation-subtext');
+const aiProgressFill = document.getElementById('ai-progress-fill');
+const aiProgressText = document.getElementById('ai-progress-text');
+const aiCancelButton = document.getElementById('ai-cancel-button');
+
+// Silly loading messages
+const loadingMessages = [
+    { main: "brb pestering the music magician", sub: "conjuring your sonic masterpiece..." },
+    { main: "tickling the sound waves", sub: "teaching notes to dance together..." },
+    { main: "whispering sweet melodies", sub: "into the digital void..." },
+    { main: "bribing the rhythm fairies", sub: "with virtual cookies..." },
+    { main: "negotiating with the beat", sub: "it's driving a hard bargain..." },
+    { main: "summoning audio spirits", sub: "from the ethereal soundscape..." }
+];
+
+function showAiGenerationOverlay(estimatedSeconds) {
+    // Random silly message
+    const message = loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
+    
+    aiText.textContent = message.main;
+    aiSubtext.textContent = message.sub;
+    aiProgressText.textContent = `estimated time: ${estimatedSeconds}s`;
+    
+    // Reset progress
+    aiProgressFill.style.width = '0%';
+    aiCancelButton.classList.remove('visible');
+    
+    // Show overlay
+    aiOverlay.classList.add('active');
+}
+
+function hideAiGenerationOverlay() {
+    aiOverlay.classList.remove('active');
+    
+    // Clear intervals and timeouts
+    if (aiGenerationState.progressInterval) {
+        clearInterval(aiGenerationState.progressInterval);
+        aiGenerationState.progressInterval = null;
+    }
+    if (aiGenerationState.timeoutId) {
+        clearTimeout(aiGenerationState.timeoutId);
+        aiGenerationState.timeoutId = null;
+    }
+}
+
+function updateProgress(elapsedSeconds, estimatedSeconds, isNearEnd = false) {
+    let progressPercent;
+    
+    if (isNearEnd && elapsedSeconds >= estimatedSeconds * 0.95) {
+        // Slow down progress dramatically near the end
+        const overtime = elapsedSeconds - (estimatedSeconds * 0.95);
+        const maxOvertime = estimatedSeconds * 0.5; // Allow 50% overtime
+        const overtimeProgress = Math.min(overtime / maxOvertime, 1) * 5; // Very slow progress
+        progressPercent = Math.min(95 + overtimeProgress, 99.5);
+    } else {
+        // Normal progress until 95%
+        progressPercent = Math.min((elapsedSeconds / estimatedSeconds) * 95, 95);
+    }
+    
+    aiProgressFill.style.width = `${progressPercent}%`;
+    
+    // Update time text
+    const remaining = Math.max(0, estimatedSeconds - elapsedSeconds);
+    if (remaining > 0) {
+        aiProgressText.textContent = `estimated time: ${Math.ceil(remaining)}s`;
+    } else {
+        aiProgressText.textContent = "almost there...";
+    }
+}
+
+function startProgressTracking(estimatedSeconds) {
+    aiGenerationState.startTime = Date.now();
+    aiGenerationState.estimatedDuration = estimatedSeconds;
+    
+    // Update progress every 100ms for smooth animation
+    aiGenerationState.progressInterval = setInterval(() => {
+        const elapsed = (Date.now() - aiGenerationState.startTime) / 1000;
+        const isNearEnd = elapsed >= estimatedSeconds * 0.95;
+        updateProgress(elapsed, estimatedSeconds, isNearEnd);
+    }, 100);
+    
+    // Show cancel button after 1 minute
+    aiGenerationState.timeoutId = setTimeout(() => {
+        aiCancelButton.classList.add('visible');
+        aiSubtext.textContent = "taking longer than expected...";
+    }, 60000);
+}
+
+function cancelGeneration() {
+    if (aiGenerationState.abortController) {
+        aiGenerationState.abortController.abort();
+    }
+    
+    aiGenerationState.isGenerating = false;
+    hideAiGenerationOverlay();
+    
+    // Reset button state
+    generateButton.disabled = false;
+    generateButton.textContent = 'Generate';
+    
+    errorHandler.showWarning('Music generation was cancelled.', {
+        title: 'Generation Cancelled',
+        duration: 3000
+    });
+}
+
+// Handle cancel button click
+if (aiCancelButton) {
+    aiCancelButton.addEventListener('click', cancelGeneration);
+}
+
 // Handle music generation
 if (generateButton) {
     generateButton.addEventListener('click', async (e) => {
         e.preventDefault();
+        
+        // Prevent multiple simultaneous generations
+        if (aiGenerationState.isGenerating) return;
+        
         const prompt = musicPromptInput.value.trim();
         const apiKey = apiKeyInput.value.trim();
         
@@ -1581,16 +2178,26 @@ if (generateButton) {
         }
 
         const length = parseInt(musicLengthSelect.value);
+        const estimatedSeconds = Math.ceil(length / 1000) * 2; // 2x the audio length
         
         try {
             // Save API key for future use
             await saveApiKey(apiKey);
             
-            // Show loading indicator
-            loadingIndicator.textContent = 'Generating music with AI...';
-            loadingIndicator.classList.add('active');
+            // Set generation state
+            aiGenerationState.isGenerating = true;
+            aiGenerationState.abortController = new AbortController();
+            
+            // Update button state
             generateButton.disabled = true;
             generateButton.textContent = 'Generating...';
+            
+            // Show AI generation overlay
+            showAiGenerationOverlay(estimatedSeconds);
+            startProgressTracking(estimatedSeconds);
+            
+            // Close add music panel
+            addMusicPanel.classList.remove('expanded');
 
             const response = await fetch('/api/generate-music', {
                 method: 'POST',
@@ -1601,13 +2208,23 @@ if (generateButton) {
                     prompt: prompt,
                     length: length,
                     apiKey: apiKey
-                })
+                }),
+                signal: aiGenerationState.abortController.signal
             });
 
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Music generation failed');
+                const errorData = await response.json();
+                // Pass the full error object to preserve type and other properties
+                const error = new Error(errorData.message || errorData.error || 'Music generation failed');
+                error.type = errorData.type;
+                error.statusCode = errorData.statusCode;
+                error.promptSuggestion = errorData.promptSuggestion;
+                throw error;
             }
+
+            // Complete the progress bar
+            aiProgressFill.style.width = '100%';
+            aiProgressText.textContent = 'processing audio...';
 
             // Get the generated audio as blob
             const blob = await response.blob();
@@ -1618,7 +2235,6 @@ if (generateButton) {
 
             // Reset form
             musicPromptInput.value = '';
-            addMusicPanel.classList.remove('expanded');
             
             // Close songs panel if open
             if (songsPanel && songsPanel.classList.contains('open')) {
@@ -1629,14 +2245,20 @@ if (generateButton) {
         } catch (error) {
             console.error('Music generation error:', error);
             
-            // Use the new error handling system
-            errorHandler.showError(error, {
-                title: 'Music Generation Failed',
-                duration: 10000
-            });
+            // Don't show error if it was cancelled
+            if (error.name !== 'AbortError') {
+                // Use the new error handling system
+                errorHandler.showError(error, {
+                    title: 'Music Generation Failed',
+                    duration: 10000
+                });
+            }
         } finally {
-            // Hide loading indicator
-            loadingIndicator.classList.remove('active');
+            // Reset generation state
+            aiGenerationState.isGenerating = false;
+            hideAiGenerationOverlay();
+            
+            // Reset button state
             generateButton.disabled = false;
             generateButton.textContent = 'Generate';
         }
@@ -1646,48 +2268,131 @@ if (generateButton) {
 // Process generated music file
 async function processGeneratedMusic(file, prompt) {
     try {
-        // Stop any currently playing audio
+        // Clear any existing error toasts to prevent confusion
+        errorHandler.clearAll();
+        
+        // Stop any currently playing audio cleanly
         stopAudio();
 
         // Generate ID and create metadata
         const id = await computeFileId(file);
         const gradient = generateRandomGradient();
 
-        // Create title from prompt (first few words)
-        const words = prompt.split(' ').slice(0, 3).join(' ');
-        const title = words.charAt(0).toUpperCase() + words.slice(1).toLowerCase();
+        // Generate creative title and author using the free LLM service
+        let title = 'Generated Music';
+        let artist = 'AI Artist';
+        let coverImageBlob = null;
+        
+        try {
+            // Generate metadata and cover image in parallel
+            const [metadataResponse, coverImageResponse] = await Promise.allSettled([
+                fetch('/api/generate-song-metadata', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ prompt })
+                }),
+                fetch('/api/generate-cover-image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ prompt })
+                })
+            ]);
+            
+            // Handle metadata response
+            if (metadataResponse.status === 'fulfilled' && metadataResponse.value.ok) {
+                const metadata = await metadataResponse.value.json();
+                if (metadata.title) title = metadata.title;
+                if (metadata.author) artist = metadata.author;
+            } else if (metadataResponse.status === 'fulfilled' && metadataResponse.value.status === 429) {
+                console.log('LLM service rate limited, using fallback metadata');
+            } else {
+                console.warn('LLM metadata generation failed, using fallback');
+            }
+            
+            // Handle cover image response
+            if (coverImageResponse.status === 'fulfilled' && coverImageResponse.value.ok) {
+                const imageBlob = await coverImageResponse.value.blob();
+                if (imageBlob && imageBlob.size > 0) {
+                    coverImageBlob = imageBlob;
+                    console.log('Generated cover image successfully:', imageBlob.size, 'bytes');
+                } else {
+                    console.warn('Cover image generation returned empty data');
+                }
+            } else {
+                console.warn('Cover image generation failed, will use gradient fallback');
+                if (coverImageResponse.status === 'fulfilled') {
+                    console.warn('Cover image error status:', coverImageResponse.value.status);
+                }
+            }
+        } catch (error) {
+            console.warn('Error calling generation services:', error);
+            // Use fallback values already set above
+        }
 
-        // Store in IndexedDB
+        // Store in IndexedDB with proper metadata
         const audioRecord = {
             id,
             file,
-            title: title || 'Generated Music',
-            artist: 'AI Generated',
-            cover: null,
-            gradient: gradient,
-            createdAt: Date.now()
+            title: title,
+            artist: artist,
+            cover: coverImageBlob, // Use generated cover image if available
+            gradient: gradient, // Keep gradient as fallback
+            createdAt: Date.now(),
+            isGenerated: true // Flag to identify generated music
         };
         await idbPut('audio', audioRecord);
 
-        // Update UI
+        // Update UI immediately with smooth transition
         songTitleElement.textContent = audioRecord.title;
         songAuthorElement.textContent = audioRecord.artist;
-        await updateRecordAppearance(gradient);
+        
+        // Update record appearance with generated cover or gradient fallback
+        if (coverImageBlob) {
+            const coverUrl = URL.createObjectURL(coverImageBlob);
+            setCurrentRecordCover(coverUrl); // Properly manage the record cover URL
+            await updateRecordAppearance(coverUrl);
+        } else {
+            await updateRecordAppearance(gradient);
+        }
 
-        // Set up audio playback and start playing
-        await setupAudioPlayback(file);
-        handlePlayback();
+        // Set up audio playback with error handling
+        try {
+            await setupAudioPlayback(file);
+            
+            // Wait a moment for audio to be ready, then start playback
+            setTimeout(() => {
+                handlePlayback().catch(playbackError => {
+                    console.warn('Playback started automatically after generation:', playbackError);
+                    // Don't throw error for autoplay issues, just log it
+                });
+            }, 100);
+            
+        } catch (audioError) {
+            console.error('Error setting up audio playback:', audioError);
+            // Don't throw - the music was generated successfully, just can't play immediately
+            errorHandler.showWarning('Music generated successfully but couldn\'t start playing automatically. Click the record to play.', {
+                title: 'Playback Issue',
+                duration: 4000
+            });
+        }
 
-        // Refresh songs list
+        // Refresh songs list to show the new track
         renderSongs();
 
-        // Show success message
-        errorHandler.showSuccess(`"${title}" has been generated and added to your collection!`, {
-            duration: 5000
-        });
+        // Show success message with a delay to avoid overlapping with the overlay
+        setTimeout(() => {
+            errorHandler.showSuccess(`"${audioRecord.title}" conjured successfully! 🎵`, {
+                duration: 4000
+            });
+        }, 500);
 
     } catch (error) {
         console.error('Error processing generated music:', error);
+        // Re-throw to be handled by the calling function
         throw error;
     }
 }
