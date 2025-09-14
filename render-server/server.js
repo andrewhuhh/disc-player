@@ -4,14 +4,6 @@ const cors = require('cors');
 const ytdl = require('@distube/ytdl-core');
 const rateLimit = require('express-rate-limit');
 
-// Optional dependencies
-let ffmpeg;
-try {
-    ffmpeg = require('fluent-ffmpeg');
-} catch (err) {
-    console.log('Optional dependency fluent-ffmpeg not available, some features may be limited');
-}
-
 const app = express();
 const port = process.env.PORT || 3000;
 
