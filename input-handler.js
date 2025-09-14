@@ -89,7 +89,7 @@ class InputHandler {
             }
 
             // Make request to our backend conversion service
-            const response = await fetch(`${apiBaseUrl}/youtube-convert`, {
+            const response = await fetch(`${apiBaseUrl}/api/youtube-convert`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -165,7 +165,7 @@ class InputHandler {
     async fetchYouTubeMetadata(videoId, apiBaseUrl) {
         try {
             console.log('Fetching metadata for video ID:', videoId);
-            const response = await fetch(`${apiBaseUrl}/youtube-metadata/${videoId}`);
+            const response = await fetch(`${apiBaseUrl}/api/youtube-metadata/${videoId}`);
             
             if (!response.ok) {
                 console.error('Metadata fetch failed with status:', response.status);
@@ -202,7 +202,7 @@ class InputHandler {
             const apiBaseUrl = this.getApiBaseUrl();
             
             // Instead of fetching directly, go through your backend proxy
-            const response = await fetch(`${apiBaseUrl}/proxy-audio`, {
+            const response = await fetch(`${apiBaseUrl}/api/proxy-audio`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
