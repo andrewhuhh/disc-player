@@ -3,34 +3,21 @@ FROM node:20
 # Install Python + pip + ffmpeg and ensure yt-dlp is in predictable location
 RUN apt-get update && apt-get install -y python3 python3-pip ffmpeg curl \
   && echo "Installing yt-dlp..." \
-  && pip3 install --no-cache-dir yt-dlp \
-  && echo "Checking pip3 installation locations..." \
-  && python3 -m pip show -f yt-dlp | head -20 \
-  && echo "Checking for yt-dlp binary..." \
-  && find /usr -name "yt-dlp*" 2>/dev/null || true \
-  && echo "Checking PATH and python user base..." \
-  && echo "PATH: $PATH" \
-  && python3 -m site --user-base \
-  && echo "Adding python user bin to PATH..." \
-  && export PATH="$PATH:$(python3 -m site --user-base)/bin:/usr/local/bin:/usr/bin" \
-  && echo "New PATH: $PATH" \
-  && echo "Attempting to find yt-dlp..." \
-  && which yt-dlp || echo "yt-dlp not found in PATH, trying alternatives..." \
-  && if [ -f /usr/local/bin/yt-dlp ]; then \
-       echo "Found yt-dlp at /usr/local/bin/yt-dlp"; \
-     elif [ -f /usr/bin/yt-dlp ]; then \
-       echo "Found yt-dlp at /usr/bin/yt-dlp"; \
-     elif [ -f "$(python3 -m site --user-base)/bin/yt-dlp" ]; then \
-       echo "Found yt-dlp in user bin, creating symlink..."; \
-       ln -sf "$(python3 -m site --user-base)/bin/yt-dlp" /usr/local/bin/yt-dlp; \
-     else \
-       echo "yt-dlp not found, trying direct installation to /usr/local/bin..."; \
-       curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp; \
-       chmod +x /usr/local/bin/yt-dlp; \
-     fi \
-  && echo "Final verification:" \
-  && ls -la /usr/local/bin/yt-dlp \
-  && /usr/local/bin/yt-dlp --version
+  # Install yt-dlp both as a Python module and as a binary
+  && pip3 install --no-cache-dir --break-system-packages yt-dlp \
+  && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+  && chmod a+rx /usr/local/bin/yt-dlp \
+  # Ensure the binary is executable and in PATH
+  && ln -sf /usr/local/bin/yt-dlp /usr/bin/yt-dlp \
+  # Verify installations
+  && echo "Verifying yt-dlp installations:" \
+  && echo "1. Binary version:" \
+  && /usr/local/bin/yt-dlp --version \
+  && echo "2. Python module version:" \
+  && python3 -m yt_dlp --version \
+  # Create necessary directories and set permissions
+  && mkdir -p /tmp/yt-dlp \
+  && chmod 777 /tmp/yt-dlp
 
 # Set app directory
 WORKDIR /app
@@ -43,7 +30,9 @@ RUN npm install --production
 COPY . .
 
 # Set environment variables
-ENV NODE_ENV=production
-ENV PATH="${PATH}:/usr/local/bin:/usr/bin:/home/node/.local/bin:/root/.local/bin"
+ENV NODE_ENV=production \
+    PATH="/usr/local/bin:/usr/bin:/home/node/.local/bin:/root/.local/bin:${PATH}" \
+    PYTHONPATH="/usr/local/lib/python3.11/site-packages:/usr/lib/python3/dist-packages:${PYTHONPATH}" \
+    YTDLP_PATH="/usr/local/bin/yt-dlp"
 
 CMD ["npm", "start"]
