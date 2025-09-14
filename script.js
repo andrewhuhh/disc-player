@@ -773,7 +773,7 @@ document.body.appendChild(canvas);
 function resizeCanvas() {
     // Size for bottom bar visualizer
     canvas.width = window.innerWidth;
-    canvas.height = 80;
+    canvas.height = 160;
     
     // Update canvas context properties
     canvasCtx = canvas.getContext('2d', { alpha: true });
@@ -1957,6 +1957,14 @@ async function renderSongs() {
         name.className = 'playlist-name';
         name.textContent = playlist.name || 'Playlist';
         meta.appendChild(name);
+        
+        // Add description if it exists and is not empty
+        if (playlist.description && playlist.description.trim()) {
+            const description = document.createElement('div');
+            description.className = 'playlist-description';
+            description.textContent = playlist.description.trim();
+            meta.appendChild(description);
+        }
 
         header.appendChild(cover);
         header.appendChild(meta);

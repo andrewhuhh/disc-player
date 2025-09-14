@@ -53,10 +53,18 @@ h1, h2, h3, h4, h5, h6 {
 
 .song-title {
     opacity: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 24ch;
 }
 
 .song-author {
     opacity: 0.7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 20ch;
 }
 
 .container {
@@ -152,7 +160,8 @@ h1, h2, h3, h4, h5, h6 {
 
 .record-inner {
     width: 200px;
-    height: 200px;
+    max-width: 30vw;
+    aspect-ratio: 1/1;
     position: relative;
     border-radius: 100%;
     background-image: var(--record-bg-image);
@@ -231,7 +240,7 @@ h1, h2, h3, h4, h5, h6 {
     bottom: 0;
     left: 0;
     width: 100%;
-    height: 80px;
+    height: auto;
     z-index: 10;
     pointer-events: none;
 }
@@ -632,7 +641,7 @@ h1, h2, h3, h4, h5, h6 {
     display: flex;
     flex-direction: row-reverse;
     align-items: center;
-    justify-content: start;
+    justify-content: end;
     gap: 12px;
     cursor: pointer;
     border-radius: 8px;
@@ -715,7 +724,22 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .playlist-meta { text-align: right; font-size: 12px; line-height: 1.2; }
-.playlist-name { opacity: 0.95; }
+.playlist-name { 
+    opacity: 0.95; 
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 24ch;
+}
+.playlist-description { 
+    opacity: 0.6; 
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 20ch;
+    font-size: 11px;
+    margin-top: 2px;
+}
 
 .playlist-content {
     display: none;
@@ -740,6 +764,7 @@ h1, h2, h3, h4, h5, h6 {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 24ch;
 }
 
 .song-artist {
@@ -747,6 +772,7 @@ h1, h2, h3, h4, h5, h6 {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 20ch;
 }
 
 /* Add song button and input */
@@ -1060,6 +1086,7 @@ h1, h2, h3, h4, h5, h6 {
 /* Combined Add Music Panel Styles */
 .add-music-panel {
     width: 30px;
+    max-width: 75vw;
     height: 30px;
     margin: 18px;
     display: flex;
@@ -1764,4 +1791,20 @@ h1, h2, h3, h4, h5, h6 {
 
 .delete-confirm-btn:active {
     transform: scale(0.98);
+}
+
+/* Mobile positioning for songs button and panel */
+@media (max-width: 768px) {
+    .songs-button {
+        top: 24px;
+        right: 24px;
+        bottom: auto;
+    }
+    
+    .songs-panel {
+        top: 90px;
+        right: 12px;
+        bottom: auto;
+        flex-direction: column-reverse!important;
+    }
 }
