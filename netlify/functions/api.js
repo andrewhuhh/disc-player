@@ -2,7 +2,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const ytdl = require('ytdl-core');
+const ytdl = require('@distube/ytdl-core');
 
 // Helper to generate safe temporary filenames
 function generateTempFilename() {
@@ -56,8 +56,12 @@ exports.handler = async (event, context) => {
     
     try {
         // Parse the path to determine which endpoint to call
+        // Normalize path to segments after the 'api' segment so that
+        // routes like /api/youtube-metadata/:id are handled correctly
         const pathParts = requestPath.split('/').filter(Boolean);
-        const endpoint = pathParts[pathParts.length - 1];
+        const apiIndex = pathParts.findIndex((p) => p === 'api');
+        const routeParts = apiIndex >= 0 ? pathParts.slice(apiIndex + 1) : pathParts;
+        const endpoint = routeParts[0];
         
         switch (endpoint) {
             case 'health':
@@ -82,7 +86,7 @@ exports.handler = async (event, context) => {
                 
             case 'youtube-metadata':
                 if (httpMethod === 'GET') {
-                    const videoId = pathParts[pathParts.length - 2];
+                    const videoId = routeParts[1];
                     return await handleYouTubeMetadata(videoId);
                 }
                 break;
@@ -170,10 +174,24 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
 
         console.log('Extracted metadata:', extractedMetadata);
 
+        // Choose best audio-only format to set accurate headers/extension
+        const selectedFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' });
+        const container = selectedFormat?.container || '';
+        const codecs = selectedFormat?.codecs || '';
+        const isWebm = container === 'webm' || /opus/i.test(codecs);
+        const contentType = isWebm ? 'audio/webm' : 'audio/mp4';
+        const fileExtension = isWebm ? 'webm' : 'm4a';
+
         // Get the best audio stream
         const audioStream = ytdl(url, { 
             quality: 'highestaudio',
-            filter: 'audioonly'
+            filter: 'audioonly',
+            requestOptions: {
+                headers: {
+                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+                    'accept-language': 'en-US,en;q=0.9'
+                }
+            }
         });
 
         // Collect audio data chunks
@@ -191,13 +209,13 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
 
         const safeTitle = extractedMetadata.title.replace(/[^\w\s-]/g, '').trim();
         const safeArtist = extractedMetadata.artist.replace(/[^\w\s-]/g, '').trim();
-        const filename = `${safeArtist} - ${safeTitle}.mp3`.substring(0, 200);
+        const filename = `${safeArtist} - ${safeTitle}.${fileExtension}`.substring(0, 200);
 
         return {
             statusCode: 200,
             headers: {
                 ...corsHeaders,
-                'Content-Type': 'audio/mpeg',
+                'Content-Type': contentType,
                 'Content-Disposition': `attachment; filename="${filename}"`,
                 'X-Video-Title': extractedMetadata.title,
                 'X-Video-Artist': extractedMetadata.artist,

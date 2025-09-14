@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const cors = require('cors');
-const ytdl = require('ytdl-core');
+const ytdl = require('@distube/ytdl-core');
 require('dotenv').config();
 
 // Optional dependencies for local development
@@ -214,7 +214,7 @@ app.post('/api/youtube-convert', async (req, res) => {
         return res.status(400).json({ error: 'URL is required' });
     }
 
-    const outputFile = path.join(tempDir, `${generateTempFilename()}.mp3`);
+    let outputFile;
 
     try {
         // Validate YouTube URL
@@ -224,7 +224,14 @@ app.post('/api/youtube-convert', async (req, res) => {
 
         // Get video metadata using ytdl-core
         console.log('Fetching video metadata...');
-        const info = await ytdl.getInfo(url);
+        const info = await ytdl.getInfo(url, {
+            requestOptions: {
+                headers: {
+                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+                    'accept-language': 'en-US,en;q=0.9'
+                }
+            }
+        });
         const videoDetails = info.videoDetails;
         
         // Extract metadata
@@ -238,10 +245,27 @@ app.post('/api/youtube-convert', async (req, res) => {
 
         console.log('Extracted metadata:', extractedMetadata);
 
+        // Choose best audio-only format to set accurate headers/extension
+        const selectedFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' });
+        const container = selectedFormat?.container || '';
+        const codecs = selectedFormat?.codecs || '';
+        const isWebm = container === 'webm' || /opus/i.test(codecs);
+        const contentType = isWebm ? 'audio/webm' : 'audio/mp4';
+        const fileExtension = isWebm ? 'webm' : 'm4a';
+
+        // Determine output file path based on availability of ffmpeg
+        outputFile = path.join(tempDir, `${generateTempFilename()}.${(ffmpeg && ffmpegPath) ? 'mp3' : fileExtension}`);
+
         // Get the best audio stream
         const audioStream = ytdl(url, { 
             quality: 'highestaudio',
-            filter: 'audioonly'
+            filter: 'audioonly',
+            requestOptions: {
+                headers: {
+                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+                    'accept-language': 'en-US,en;q=0.9'
+                }
+            }
         });
 
         // Convert to MP3 with ffmpeg and add ID3 tags
@@ -279,7 +303,7 @@ app.post('/api/youtube-convert', async (req, res) => {
         }
 
         // Add ID3 tags to the MP3 file
-        if (NodeID3) {
+        if (NodeID3 && outputFile.endsWith('.mp3')) {
             try {
                 const id3Tags = {
                     title: extractedMetadata.title,
@@ -303,9 +327,9 @@ app.post('/api/youtube-convert', async (req, res) => {
         // Set proper headers with metadata
         const safeTitle = extractedMetadata.title.replace(/[^\w\s-]/g, '').trim();
         const safeArtist = extractedMetadata.artist.replace(/[^\w\s-]/g, '').trim();
-        const filename = `${safeArtist} - ${safeTitle}.mp3`.substring(0, 200);
+        const filename = `${safeArtist} - ${safeTitle}.${outputFile.endsWith('.mp3') ? 'mp3' : fileExtension}`.substring(0, 200);
 
-        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Content-Type', outputFile.endsWith('.mp3') ? 'audio/mpeg' : contentType);
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('X-Video-Title', extractedMetadata.title);
         res.setHeader('X-Video-Artist', extractedMetadata.artist);
@@ -362,8 +386,15 @@ app.get('/api/youtube-metadata/:videoId', async (req, res) => {
             throw new Error('Invalid YouTube URL');
         }
 
-        // Get video info
-        const info = await ytdl.getInfo(url);
+        // Get video info with request headers
+        const info = await ytdl.getInfo(url, {
+            requestOptions: {
+                headers: {
+                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+                    'accept-language': 'en-US,en;q=0.9'
+                }
+            }
+        });
         const videoDetails = info.videoDetails;
         
         // Extract metadata

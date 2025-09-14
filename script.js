@@ -569,6 +569,12 @@ async function moveSongToPlaylist(songId, targetPlaylistId = null) {
         const target = await idbGet('playlists', targetPlaylistId);
         if (!target) return null;
         song.playlistId = targetPlaylistId;
+        // Inherit cover art: if the playlist has no cover yet, use the first added song's cover
+        if (!target.cover && song.cover instanceof Blob) {
+            target.cover = song.cover;
+            target.updatedAt = Date.now();
+            await idbPut('playlists', target);
+        }
     } else {
         delete song.playlistId; // move to root
     }
@@ -1018,7 +1024,7 @@ async function computeFileId(file) {
 }
 
 // Process the dropped audio file
-async function processAudioFile(file) {
+async function processAudioFile(file, initialMetadata = null) {
     try {
         // Stop any currently playing audio
         stopAudio();
@@ -1030,32 +1036,55 @@ async function processAudioFile(file) {
         }
 
         // Compute ID and extract metadata
-        const [id, metadata] = await Promise.all([
+        const [id, extracted] = await Promise.all([
             computeFileId(file),
             extractMetadata(file)
         ]);
 
+        // Merge metadata: prefer initial metadata from caller, then extracted, then filename fallback
+        const filenameMeta = deriveMetadataFromFilename(file.name);
+        const mergedMetadata = {
+            title: (initialMetadata?.title || extracted.title || filenameMeta.title || 'UNKNOWN').toString(),
+            artist: (initialMetadata?.artist || initialMetadata?.author || extracted.artist || filenameMeta.artist || 'UNNAMED').toString(),
+            coverBlob: extracted.coverBlob || null,
+            coverUrl: extracted.coverUrl || null
+        };
+
+        // If no embedded cover, try to fetch thumbnail provided by caller
+        if (!mergedMetadata.coverBlob && initialMetadata?.thumbnail) {
+            try {
+                const resp = await fetch(initialMetadata.thumbnail);
+                if (resp.ok) {
+                    const blob = await resp.blob();
+                    mergedMetadata.coverBlob = blob;
+                    mergedMetadata.coverUrl = URL.createObjectURL(blob);
+                }
+            } catch (e) {
+                // ignore thumbnail fetch errors; continue without cover
+            }
+        }
+
         // Generate a permanent gradient if no cover art
-        const gradient = !metadata.coverBlob ? generateRandomGradient() : null;
+        const gradient = !mergedMetadata.coverBlob ? generateRandomGradient() : null;
 
         // Store in IndexedDB (upsert without clearing)
         const audioRecord = {
             id,
             file,
-            title: metadata.title,
-            artist: metadata.artist,
-            cover: metadata.coverBlob || null,
+            title: mergedMetadata.title,
+            artist: mergedMetadata.artist,
+            cover: mergedMetadata.coverBlob || null,
             gradient: gradient, // Store permanent gradient if no cover
             createdAt: Date.now()
         };
         await idbPut('audio', audioRecord);
 
         // Update UI appearance and text
-        songTitleElement.textContent = metadata.title || 'UNKNOWN';
-        songAuthorElement.textContent = metadata.artist || 'UNNAMED';
-        if (metadata.coverUrl) {
-            setCurrentRecordCover(metadata.coverUrl);
-            updateRecordAppearance(metadata.coverUrl);
+        songTitleElement.textContent = mergedMetadata.title || 'UNKNOWN';
+        songAuthorElement.textContent = mergedMetadata.artist || 'UNNAMED';
+        if (mergedMetadata.coverUrl) {
+            setCurrentRecordCover(mergedMetadata.coverUrl);
+            updateRecordAppearance(mergedMetadata.coverUrl);
         } else if (gradient) {
             updateRecordAppearance(gradient);
         } else {
@@ -1140,6 +1169,35 @@ async function extractMetadata(file) {
     } catch (error) {
         console.error('Error extracting metadata:', error);
         return metadata;
+    }
+}
+
+// Fallback: derive title/artist from filename patterns like "Artist - Title.ext"
+function deriveMetadataFromFilename(filename) {
+    try {
+        const nameOnly = filename.replace(/\.[^/.]+$/, '');
+        // Common pattern: Artist - Title
+        const dashMatch = nameOnly.match(/^(.*?)\s*-\s*(.*)$/);
+        if (dashMatch) {
+            const artist = dashMatch[1].trim();
+            const title = dashMatch[2].trim();
+            if (artist && title) {
+                return { title, artist };
+            }
+        }
+        // Alternative pattern: Title (Artist) or Title [Artist]
+        const parenMatch = nameOnly.match(/^(.*?)\s*(?:\(|\[)([^)\]]+)(?:\)|\])\s*$/);
+        if (parenMatch) {
+            const title = parenMatch[1].trim();
+            const artist = parenMatch[2].trim();
+            if (artist && title) {
+                return { title, artist };
+            }
+        }
+        // Default: use whole name as title
+        return { title: nameOnly.trim(), artist: '' };
+    } catch (e) {
+        return { title: filename, artist: '' };
     }
 }
 

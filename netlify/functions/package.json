@@ -4,6 +4,7 @@
   "description": "Netlify serverless functions for music player",
   "main": "api.js",
   "dependencies": {
-    "ytdl-core": "^4.11.5"
+    "@distube/ytdl-core": "^4.14.7",
+    "ytdl-core": "npm:@distube/ytdl-core@latest"
   }
 }

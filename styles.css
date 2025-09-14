@@ -161,15 +161,28 @@ h1, h2, h3, h4, h5, h6 {
 .record-inner {
     width: 200px;
     max-width: 30vw;
-    aspect-ratio: 1/1;
+    aspect-ratio: 1 / 1;
     position: relative;
     border-radius: 100%;
-    background-image: var(--record-bg-image);
-    background-size: 110%;
-    background-position: center;
+    overflow: hidden; /* so zoomed bg stays inside circle */
     box-shadow: 0 0 0 20px #00000042;
     animation: unblurRecord 900ms ease forwards;
-}
+  }
+  
+  /* background split out */
+  .record-inner::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: var(--record-bg-image);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+  
+    transform: scale(1.05);       /* zoom in */
+    transform-origin: center;
+  }
+  
 
 .record-dot {
     position: absolute;
@@ -458,7 +471,6 @@ h1, h2, h3, h4, h5, h6 {
     flex-direction: column;
     margin-right: 2px;
     align-items: end;
-    gap: 12px;
     opacity: 1;
     transform: translateX(0);
 }
@@ -605,10 +617,10 @@ h1, h2, h3, h4, h5, h6 {
     height: 20px;
     position: relative;
     border-radius: 100%;
-    background-size: 110%;
+    background-size: cover;
     background-position: center;
+    background-repeat: no-repeat;
     box-shadow: 0 0 0 2px #00000042;
-    animation: unblurRecord 900ms ease forwards;
 }
 
 .song-cover-dot {
@@ -664,7 +676,7 @@ h1, h2, h3, h4, h5, h6 {
     border-radius: 4px;
     overflow: visible;
     background: var(--playlist-cover-image, linear-gradient(135deg, #222, #111));
-    background-size: 110%;
+    background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
     border: 1px solid rgb(43, 43, 43);
@@ -1418,17 +1430,6 @@ h1, h2, h3, h4, h5, h6 {
     opacity: 0;
     transform: translateX(100%) scale(0.9);
     transition: all 0.3s ease-in;
-}
-
-.error-toast::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, #ef4444, #dc2626, #b91c1c);
-    border-radius: 12px 12px 0 0;
 }
 
 .error-toast-header {

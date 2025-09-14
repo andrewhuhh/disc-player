@@ -123,8 +123,8 @@ class InputHandler {
             const file = new File([blob], filename, { type: blob.type });
             console.log('Created file with name:', file.name);
             
-            // Use the existing processAudioFile function
-            await window.processAudioFile(file);
+            // Pass metadata so we keep title/artist when container has no tags
+            await window.processAudioFile(file, metadata || undefined);
             
             // Show success message
             if (window.errorHandler) {
