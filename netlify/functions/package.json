@@ -4,10 +4,6 @@
   "description": "Netlify serverless functions for music player",
   "main": "api.js",
   "dependencies": {
-    "@distube/ytdl-core": "^4.14.7",
-    "node-fetch": "^2.7.0",
-    "buffer": "^6.0.3",
-    "events": "^3.3.0",
-    "web-streams-polyfill": "^3.2.1"
+    "node-fetch": "^2.7.0"
   }
 }

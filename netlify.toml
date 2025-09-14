@@ -19,11 +19,3 @@
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["@distube/ytdl-core", "buffer", "events", "web-streams-polyfill"]
-  included_files = ["netlify/functions/node_modules/@distube/ytdl-core/**/*"]
-  
-[functions.environment]
-  NODE_OPTIONS = "--experimental-fetch"
-
-[functions.api]
-  timeout = 30

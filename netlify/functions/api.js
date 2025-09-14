@@ -1,47 +1,3 @@
-// Load polyfills before anything else
-const { File, Blob, Headers, ReadableStream } = require('./polyfills');
-
-// Assign to global scope
-Object.assign(global, { File, Blob, Headers, ReadableStream });
-
-// Now load other dependencies
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-const ytdl = require('@distube/ytdl-core');
-const fetch = require('node-fetch');
-
-// Helper to generate safe temporary filenames
-function generateTempFilename() {
-    return crypto.randomBytes(16).toString('hex');
-}
-
-// Create temp directory if it doesn't exist
-const tempDir = path.join('/tmp', 'music-player');
-if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-}
-
-// Clean up temp files older than 1 hour
-function cleanupTempFiles() {
-    const oneHourAgo = Date.now() - (60 * 60 * 1000);
-    fs.readdir(tempDir, (err, files) => {
-        if (err) return;
-        files.forEach(file => {
-            const filePath = path.join(tempDir, file);
-            fs.stat(filePath, (err, stats) => {
-                if (err) return;
-                if (stats.mtimeMs < oneHourAgo) {
-                    fs.unlink(filePath, () => {});
-                }
-            });
-        });
-    });
-}
-
-// Run cleanup every hour
-setInterval(cleanupTempFiles, 60 * 60 * 1000);
-
 // CORS headers
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -59,12 +15,10 @@ exports.handler = async (event, context) => {
         };
     }
 
-    const { path: requestPath, httpMethod, body, queryStringParameters } = event;
+    const { path: requestPath, httpMethod, body } = event;
     
     try {
         // Parse the path to determine which endpoint to call
-        // Normalize path to segments after the 'api' segment so that
-        // routes like /api/youtube-metadata/:id are handled correctly
         const pathParts = requestPath.split('/').filter(Boolean);
         const apiIndex = pathParts.findIndex((p) => p === 'api');
         const routeParts = apiIndex >= 0 ? pathParts.slice(apiIndex + 1) : pathParts;
@@ -82,25 +36,6 @@ exports.handler = async (event, context) => {
                             environment: process.env.NODE_ENV || 'development'
                         })
                     };
-                }
-                break;
-                
-            case 'youtube-convert':
-                if (httpMethod === 'POST') {
-                    return await handleYouTubeConvert(JSON.parse(body || '{}'));
-                }
-                break;
-                
-            case 'youtube-metadata':
-                if (httpMethod === 'GET') {
-                    const videoId = routeParts[1];
-                    return await handleYouTubeMetadata(videoId);
-                }
-                break;
-                
-            case 'proxy-audio':
-                if (httpMethod === 'POST') {
-                    return await handleProxyAudio(JSON.parse(body || '{}'));
                 }
                 break;
                 
@@ -149,380 +84,6 @@ exports.handler = async (event, context) => {
     }
 };
 
-// YouTube conversion handler
-async function handleYouTubeConvert({ url, videoId, metadata }) {
-    console.log('Starting YouTube conversion for URL:', url);
-    console.log('Environment:', process.env.NODE_ENV);
-    console.log('Node version:', process.version);
-    console.log('Available globals:', Object.keys(global));
-
-    if (!url) {
-        console.log('No URL provided');
-        return {
-            statusCode: 400,
-            headers: corsHeaders,
-            body: JSON.stringify({ error: 'URL is required' })
-        };
-    }
-
-    try {
-        // Validate YouTube URL
-        console.log('Validating YouTube URL...');
-        if (!ytdl.validateURL(url)) {
-            throw new Error('Invalid YouTube URL');
-        }
-
-        // Get video metadata using ytdl-core
-        console.log('Fetching video metadata...');
-        const info = await ytdl.getInfo(url, YOUTUBE_REQUEST_OPTIONS).catch(err => {
-            console.error('ytdl.getInfo error:', err);
-            console.error('Error stack:', err.stack);
-            throw err;
-        });
-        
-        console.log('Video info received:', {
-            title: info.videoDetails.title,
-            length: info.videoDetails.lengthSeconds,
-            available: info.videoDetails.availableCountries?.length || 0,
-            formats: info.formats.length
-        });
-
-        const videoDetails = info.videoDetails;
-        
-        // Extract metadata
-        const extractedMetadata = {
-            title: videoDetails.title || 'Unknown Title',
-            artist: videoDetails.author?.name || 'Unknown Artist',
-            album: videoDetails.media?.category || 'YouTube',
-            year: videoDetails.uploadDate ? videoDetails.uploadDate.split('-')[0] : new Date().getFullYear().toString(),
-            duration: parseInt(videoDetails.lengthSeconds) || 0
-        };
-
-        console.log('Extracted metadata:', extractedMetadata);
-
-        // Choose best audio-only format
-        console.log('Selecting best audio format...');
-        const formats = info.formats.filter(f => f.hasAudio && !f.hasVideo);
-        console.log('Available audio formats:', formats.map(f => ({
-            itag: f.itag,
-            container: f.container,
-            quality: f.quality,
-            bitrate: f.bitrate
-        })));
-
-        const selectedFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' });
-        console.log('Selected format:', {
-            itag: selectedFormat.itag,
-            container: selectedFormat.container,
-            quality: selectedFormat.quality,
-            bitrate: selectedFormat.bitrate
-        });
-
-        const container = selectedFormat?.container || '';
-        const codecs = selectedFormat?.codecs || '';
-        const isWebm = container === 'webm' || /opus/i.test(codecs);
-        const contentType = isWebm ? 'audio/webm' : 'audio/mp4';
-        const fileExtension = isWebm ? 'webm' : 'm4a';
-
-        // Get the best audio stream
-        console.log('Starting audio stream download...');
-        const audioStream = ytdl(url, { 
-            quality: 'highestaudio',
-            filter: 'audioonly',
-            ...YOUTUBE_REQUEST_OPTIONS
-        });
-
-        // Add stream error handling
-        audioStream.on('error', (err) => {
-            console.error('Audio stream error:', err);
-            console.error('Error stack:', err.stack);
-        });
-
-        // Collect audio data chunks with progress logging
-        const chunks = [];
-        let totalSize = 0;
-        console.log('Collecting audio chunks...');
-        
-        for await (const chunk of audioStream) {
-            chunks.push(chunk);
-            totalSize += chunk.length;
-            if (totalSize % (1024 * 1024) === 0) { // Log every MB
-                console.log(`Downloaded: ${totalSize / (1024 * 1024)} MB`);
-            }
-        }
-
-        // Combine chunks into a single buffer
-        console.log('Combining audio chunks...');
-        const audioBuffer = Buffer.concat(chunks);
-        console.log('Final audio size:', audioBuffer.length / (1024 * 1024), 'MB');
-
-        if (audioBuffer.length === 0) {
-            throw new Error('No audio data received');
-        }
-
-        const safeTitle = extractedMetadata.title.replace(/[^\w\s-]/g, '').trim();
-        const safeArtist = extractedMetadata.artist.replace(/[^\w\s-]/g, '').trim();
-        const filename = `${safeArtist} - ${safeTitle}.${fileExtension}`.substring(0, 200);
-
-        console.log('Conversion successful, sending response...');
-        return {
-            statusCode: 200,
-            headers: {
-                ...corsHeaders,
-                'Content-Type': contentType,
-                'Content-Disposition': `attachment; filename="${filename}"`,
-                'X-Video-Title': extractedMetadata.title,
-                'X-Video-Artist': extractedMetadata.artist,
-                'Content-Length': audioBuffer.length.toString()
-            },
-            body: audioBuffer.toString('base64'),
-            isBase64Encoded: true
-        };
-
-    } catch (error) {
-        console.error('YouTube conversion error:', error);
-        console.error('Error stack:', error.stack);
-        console.error('Error details:', {
-            name: error.name,
-            message: error.message,
-            code: error.code,
-            statusCode: error.statusCode
-        });
-        
-        // Provide more specific error messages
-        let errorMessage = 'Conversion failed';
-        let statusCode = 500;
-
-        if (error.message.includes('Invalid YouTube URL')) {
-            errorMessage = 'Invalid YouTube URL provided';
-            statusCode = 400;
-        } else if (error.message.includes('Video unavailable')) {
-            errorMessage = 'Video is unavailable or private';
-            statusCode = 404;
-        } else if (error.message.includes('age-restricted')) {
-            errorMessage = 'Video is age-restricted and cannot be downloaded';
-            statusCode = 403;
-        } else if (error.message.includes('region')) {
-            errorMessage = 'Video is not available in your region';
-            statusCode = 451;
-        } else if (error.message.includes('Too many requests')) {
-            errorMessage = 'Rate limit exceeded';
-            statusCode = 429;
-        }
-
-        return {
-            statusCode,
-            headers: corsHeaders,
-            body: JSON.stringify({ 
-                error: errorMessage,
-                details: process.env.NODE_ENV === 'development' ? {
-                    message: error.message,
-                    stack: error.stack,
-                    code: error.code,
-                    statusCode: error.statusCode
-                } : undefined
-            })
-        };
-    }
-}
-
-// Common YouTube request options
-const YOUTUBE_REQUEST_OPTIONS = {
-    requestOptions: {
-        headers: {
-            // Mimic latest Chrome browser
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
-            'X-YouTube-Client-Name': '1',
-            'X-YouTube-Client-Version': '2.20230912.00.00'
-        },
-        // Add a random IPv4 X-Forwarded-For to help avoid rate limiting
-        transform: (parsed) => {
-            const ip = Array(4).fill(0).map(() => Math.floor(Math.random() * 256)).join('.');
-            parsed.set('x-forwarded-for', ip);
-            return parsed;
-        }
-    }
-};
-
-// YouTube metadata handler
-async function handleYouTubeMetadata(videoId) {
-    console.log('Starting metadata fetch for video ID:', videoId);
-    console.log('Environment:', process.env.NODE_ENV);
-    console.log('Node version:', process.version);
-
-    if (!videoId || videoId === 'unknown') {
-        console.log('Invalid video ID provided:', videoId);
-        return {
-            statusCode: 400,
-            headers: corsHeaders,
-            body: JSON.stringify({ error: 'Valid video ID is required' })
-        };
-    }
-
-    try {
-        const url = `https://www.youtube.com/watch?v=${videoId}`;
-        console.log('Constructed URL:', url);
-        
-        // Validate URL
-        console.log('Validating YouTube URL...');
-        if (!ytdl.validateURL(url)) {
-            throw new Error('Invalid YouTube URL');
-        }
-
-        // Get video info with error handling
-        console.log('Fetching video info...');
-        const info = await ytdl.getInfo(url, YOUTUBE_REQUEST_OPTIONS).catch(err => {
-            console.error('ytdl.getInfo error:', err);
-            console.error('Error stack:', err.stack);
-            throw err;
-        });
-        
-        console.log('Video info received:', {
-            title: info.videoDetails.title,
-            length: info.videoDetails.lengthSeconds,
-            available: info.videoDetails.availableCountries?.length || 0,
-            formats: info.formats.length
-        });
-
-        const videoDetails = info.videoDetails;
-        
-        // Extract metadata with detailed logging
-        console.log('Extracting metadata...');
-        const metadata = {
-            title: videoDetails.title || 'Unknown Title',
-            author: videoDetails.author?.name || 'Unknown Artist',
-            duration: parseInt(videoDetails.lengthSeconds) || 0,
-            thumbnail: videoDetails.thumbnails?.[0]?.url || null,
-            description: videoDetails.description || '',
-            uploadDate: videoDetails.uploadDate || null,
-            viewCount: parseInt(videoDetails.viewCount) || 0
-        };
-
-        console.log('Extracted metadata:', metadata);
-
-        return {
-            statusCode: 200,
-            headers: corsHeaders,
-            body: JSON.stringify(metadata)
-        };
-
-    } catch (error) {
-        console.error('YouTube metadata error:', error);
-        console.error('Error stack:', error.stack);
-        console.error('Error details:', {
-            name: error.name,
-            message: error.message,
-            code: error.code,
-            statusCode: error.statusCode
-        });
-        
-        let errorMessage = 'Failed to fetch video metadata';
-        let statusCode = 500;
-
-        if (error.message.includes('Video unavailable')) {
-            errorMessage = 'Video is unavailable or private';
-            statusCode = 404;
-        } else if (error.message.includes('age-restricted')) {
-            errorMessage = 'Video is age-restricted';
-            statusCode = 403;
-        } else if (error.message.includes('region')) {
-            errorMessage = 'Video is not available in your region';
-            statusCode = 451;
-        } else if (error.message.includes('Too many requests')) {
-            errorMessage = 'Rate limit exceeded';
-            statusCode = 429;
-        }
-
-        return {
-            statusCode,
-            headers: corsHeaders,
-            body: JSON.stringify({ 
-                error: errorMessage,
-                details: process.env.NODE_ENV === 'development' ? {
-                    message: error.message,
-                    stack: error.stack,
-                    code: error.code,
-                    statusCode: error.statusCode
-                } : undefined
-            })
-        };
-    }
-}
-
-// Proxy audio handler
-async function handleProxyAudio({ url }) {
-    if (!url) {
-        return {
-            statusCode: 400,
-            headers: corsHeaders,
-            body: JSON.stringify({ error: 'URL is required' })
-        };
-    }
-
-    try {
-        // Validate that it's an audio URL
-        const audioExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.wma'];
-        const isAudioUrl = audioExtensions.some(ext => url.toLowerCase().includes(ext)) || 
-                          url.includes('audio') || 
-                          url.includes('sound');
-
-        if (!isAudioUrl) {
-            return {
-                statusCode: 400,
-                headers: corsHeaders,
-                body: JSON.stringify({ error: 'URL does not appear to be an audio file' })
-            };
-        }
-
-        // Fetch the audio file
-        const response = await fetch(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch audio: ${response.status} ${response.statusText}`);
-        }
-
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.startsWith('audio/')) {
-            throw new Error('URL does not return an audio file');
-        }
-
-        const audioBuffer = await response.arrayBuffer();
-
-        return {
-            statusCode: 200,
-            headers: {
-                ...corsHeaders,
-                'Content-Type': contentType,
-                'Content-Length': audioBuffer.byteLength.toString()
-            },
-            body: Buffer.from(audioBuffer).toString('base64'),
-            isBase64Encoded: true
-        };
-
-    } catch (error) {
-        console.error('Audio proxy error:', error);
-        return {
-            statusCode: 500,
-            headers: corsHeaders,
-            body: JSON.stringify({ 
-                error: error.message || 'Failed to fetch audio file',
-                details: process.env.NODE_ENV === 'development' ? error.message : undefined
-            })
-        };
-    }
-}
-
 // Music generation handler (simplified for Netlify)
 async function handleGenerateMusic({ prompt, length = 10000, apiKey }) {
     return {
@@ -538,7 +99,6 @@ async function handleGenerateMusic({ prompt, length = 10000, apiKey }) {
 // Song metadata generation handler
 async function handleGenerateSongMetadata({ prompt }) {
     try {
-        // Construct a system prompt that encourages JSON response
         const systemPrompt = `Based on this music description, generate a creative song title and artist name. Return ONLY a JSON object with "title" and "author" fields, nothing else. Make the title catchy and the artist name creative but believable. Music description: "${prompt}"`;
 
         const response = await fetch('https://apifreellm.com/api/chat', {
@@ -602,8 +162,6 @@ async function handleGenerateSongMetadata({ prompt }) {
             
             if (titleMatch) metadata.title = titleMatch[1].trim().replace(/['"]/g, '');
             if (authorMatch) metadata.author = authorMatch[1].trim().replace(/['"]/g, '');
-            
-            console.log('Fallback regex extraction used for LLM response');
         }
 
         return {
@@ -628,7 +186,6 @@ async function handleGenerateSongMetadata({ prompt }) {
 // Cover image generation handler
 async function handleGenerateCoverImage({ prompt }) {
     try {
-        // Create image prompt based on music description
         const imagePrompt = `Album cover art for: ${prompt}. Artistic, vibrant, music-themed design`;
         
         // Generate random seed between 1-100
