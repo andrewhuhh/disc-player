@@ -5,4 +5,5 @@
 /webpack.config.js.map
 /webpack.config.js.map.gz
 /temp
+/bin
 .env
