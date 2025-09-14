@@ -36,6 +36,16 @@ app.use(cors());
 app.use(express.json());
 app.use(limiter);
 
+// Root route for basic info
+app.get('/', (req, res) => {
+    res.json({ 
+        status: 'ok',
+        service: 'Record Player API',
+        version: '1.0.0',
+        endpoints: ['/youtube-metadata/:videoId', '/youtube-convert', '/health']
+    });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -154,6 +164,32 @@ app.post('/youtube-convert', async (req, res) => {
     }
 });
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err);
+    res.status(500).json({ 
+        error: 'Internal Server Error',
+        message: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+});
+
+// 404 handler
+app.use((req, res) => {
+    console.log('404 Not Found:', req.method, req.url);
+    res.status(404).json({ 
+        error: 'Not Found',
+        message: `Cannot ${req.method} ${req.url}`,
+        status: 404
+    });
+});
+
+// Start server
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log('Available routes:');
+    console.log('- GET  /');
+    console.log('- GET  /health');
+    console.log('- GET  /youtube-metadata/:videoId');
+    console.log('- POST /youtube-convert');
 });
