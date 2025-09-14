@@ -26,6 +26,10 @@ export default class ContextMenu {
                 <i class="fas fa-edit"></i>
                 Edit
             </div>
+            <div class="context-menu-item" data-action="add-to-playlist">
+                <i class="fas fa-folder-plus"></i>
+                Add to Playlist
+            </div>
             <div class="context-menu-item" data-action="queue">
                 <i class="fas fa-list"></i>
                 Add to Queue
@@ -78,6 +82,24 @@ export default class ContextMenu {
                 // TODO: Implement queue functionality
                 console.log('Add to queue:', songData);
                 break;
+            case 'add-to-playlist': {
+                try {
+                    // Simple prompt for target playlist or create new
+                    const choice = prompt('Enter existing Playlist ID, or leave empty to create a new playlist.');
+                    if (choice === null) return;
+                    let playlistId = choice.trim();
+                    if (!playlistId) {
+                        const name = prompt('New playlist name:', '');
+                        const pl = await window.createPlaylist({ name: name || null });
+                        playlistId = pl.id;
+                    }
+                    await window.moveSongToPlaylist(songData.id, playlistId || null);
+                    await window.renderSongs();
+                } catch (err) {
+                    console.error('Add to playlist failed', err);
+                }
+                break;
+            }
 
             case 'edit':
                 this.showEditDialog(songData);
@@ -242,7 +264,7 @@ export default class ContextMenu {
                 await store.delete(songData.id);
                 
                 // Refresh the songs list
-                await window.renderSongs();
+                await window.cleanupEmptyPlaylists();
                 
                 // Close the dialog
                 dialog.classList.remove('active');

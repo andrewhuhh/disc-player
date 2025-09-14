@@ -421,6 +421,10 @@ const initDB = async () => {
             if (!db.objectStoreNames.contains('settings')) {
                 db.createObjectStore('settings', { keyPath: 'id' });
             }
+            // New store for playlists (supports nesting via parentId)
+            if (!db.objectStoreNames.contains('playlists')) {
+                db.createObjectStore('playlists', { keyPath: 'id' });
+            }
         };
 
         request.onsuccess = async (event) => {
@@ -429,7 +433,7 @@ const initDB = async () => {
             console.log('Database initialized successfully');
             
             // Verify stores exist
-            if (!db.objectStoreNames.contains('audio') || !db.objectStoreNames.contains('settings')) {
+            if (!db.objectStoreNames.contains('audio') || !db.objectStoreNames.contains('settings') || !db.objectStoreNames.contains('playlists')) {
                 console.log('Required stores missing, recreating database...');
                 db.close();
                 await deleteDatabase();
@@ -475,6 +479,120 @@ function idbGet(storeName, key) {
         req.onsuccess = () => resolve(req.result || null);
         req.onerror = () => reject(req.error);
     });
+}
+
+// Playlist helpers
+function idbDelete(storeName, key) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([storeName], 'readwrite');
+        const store = tx.objectStore(storeName);
+        const req = store.delete(key);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function createPlaylist({ name, cover = null, parentId = null }) {
+    const id = `pl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const playlist = {
+        id,
+        name: name && name.trim() ? name.trim() : await getDefaultPlaylistName(),
+        cover: cover || null,
+        parentId: parentId || null,
+        description: '',
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+    };
+    await idbPut('playlists', playlist);
+    return playlist;
+}
+
+async function getDefaultPlaylistName() {
+    const all = await idbGetAll('playlists');
+    const index = all.length;
+    return `Playlist ${index + 1}`;
+}
+
+async function renamePlaylist(id, newName) {
+    const pl = await idbGet('playlists', id);
+    if (!pl) return null;
+    pl.name = newName && newName.trim() ? newName.trim() : pl.name;
+    pl.updatedAt = Date.now();
+    await idbPut('playlists', pl);
+    return pl;
+}
+
+async function updatePlaylist(id, updates) {
+    const pl = await idbGet('playlists', id);
+    if (!pl) return null;
+    const next = { ...pl, ...updates, updatedAt: Date.now() };
+    await idbPut('playlists', next);
+    return next;
+}
+
+async function deletePlaylist(id, { deleteSongs = false } = {}) {
+    // When deleting, optionally move songs out to root or delete them
+    const items = await idbGetAll('audio');
+    const updated = [];
+    for (const item of items) {
+        if (item.playlistId === id) {
+            if (deleteSongs) {
+                await idbDelete('audio', item.id);
+            } else {
+                delete item.playlistId;
+                updated.push(item);
+            }
+        }
+    }
+    for (const u of updated) {
+        await idbPut('audio', u);
+    }
+
+    // Move or delete child playlists (keep nesting; reparent to deleted's parent)
+    const playlists = await idbGetAll('playlists');
+    const toReparent = playlists.filter(p => p.parentId === id);
+    const parent = playlists.find(p => p.id === id);
+    const newParentId = parent ? parent.parentId || null : null;
+    for (const child of toReparent) {
+        child.parentId = newParentId;
+        child.updatedAt = Date.now();
+        await idbPut('playlists', child);
+    }
+
+    await idbDelete('playlists', id);
+}
+
+async function moveSongToPlaylist(songId, targetPlaylistId = null) {
+    const song = await idbGet('audio', songId);
+    if (!song) return null;
+    if (targetPlaylistId) {
+        const target = await idbGet('playlists', targetPlaylistId);
+        if (!target) return null;
+        song.playlistId = targetPlaylistId;
+    } else {
+        delete song.playlistId; // move to root
+    }
+    await idbPut('audio', song);
+    return song;
+}
+
+async function movePlaylist(playlistId, newParentId = null) {
+    if (playlistId === newParentId) return null;
+    const pl = await idbGet('playlists', playlistId);
+    if (!pl) return null;
+    if (newParentId) {
+        // Prevent cycles
+        let checkId = newParentId;
+        while (checkId) {
+            if (checkId === playlistId) return null;
+            const next = await idbGet('playlists', checkId);
+            checkId = next ? next.parentId : null;
+        }
+    }
+    pl.parentId = newParentId || null;
+    pl.updatedAt = Date.now();
+    await idbPut('playlists', pl);
+    return pl;
 }
 
 // Initialize the database when the script loads
@@ -1709,35 +1827,72 @@ function setCurrentRecordCover(coverUrl) {
 async function renderSongs() {
     if (!db || !songsList) return;
     clearSongObjectUrls();
-    const items = await idbGetAll('audio');
-    // Sort newest first
-    items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
     songsList.innerHTML = '';
-    
-    // Create all song items first without animation class
-    for (const item of items) {
+
+    const [allSongs, allPlaylists] = await Promise.all([
+        idbGetAll('audio'),
+        idbGetAll('playlists')
+    ]);
+
+    // Ensure gradients for songs
+    for (const s of allSongs) {
+        if (!s.cover && !s.gradient) {
+            s.gradient = generateRandomGradient();
+            await idbPut('audio', s);
+        }
+    }
+
+    // Build tree: playlists by id
+    const playlistById = new Map(allPlaylists.map(p => [p.id, p]));
+    const childrenMap = new Map();
+    for (const p of allPlaylists) {
+        const list = childrenMap.get(p.parentId || 'root') || [];
+        list.push(p);
+        childrenMap.set(p.parentId || 'root', list);
+    }
+
+    // Songs by playlistId
+    const songsByPlaylist = new Map();
+    for (const s of allSongs) {
+        const key = s.playlistId || 'root';
+        const list = songsByPlaylist.get(key) || [];
+        list.push(s);
+        songsByPlaylist.set(key, list);
+    }
+
+    // Sort utility
+    const sortByCreatedDesc = (arr) => arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    function createSongItem(item) {
         const wrapper = document.createElement('div');
         wrapper.className = 'song-item';
         wrapper.dataset.id = item.id;
-        wrapper.tabIndex = 0; // Make focusable
-        wrapper.setAttribute('role', 'button'); // For accessibility
+        wrapper.dataset.title = item.title || 'UNKNOWN';
+        wrapper.dataset.playlistId = item.playlistId || 'root';
+        wrapper.dataset.type = 'song';
+        wrapper.tabIndex = 0;
+        wrapper.setAttribute('role', 'button');
         wrapper.setAttribute('aria-label', `Play ${item.title || 'Unknown'} by ${item.artist || 'Unnamed'}`);
 
         const cover = document.createElement('div');
         cover.className = 'song-cover';
+        
+        const coverInner = document.createElement('div');
+        coverInner.className = 'song-cover-inner';
+        
+        const coverDot = document.createElement('div');
+        coverDot.className = 'song-cover-dot';
+        
         if (item.cover instanceof Blob) {
             const url = URL.createObjectURL(item.cover);
             songCoverObjectUrls.push(url);
-            cover.style.backgroundImage = `url('${url}')`;
+            coverInner.style.backgroundImage = `url('${url}')`;
         } else {
-            // Use the song's permanent gradient or generate one if it doesn't exist
-            if (!item.gradient) {
-                item.gradient = generateRandomGradient();
-                await idbPut('audio', item);
-            }
-            cover.style.backgroundImage = item.gradient;
+            coverInner.style.backgroundImage = item.gradient;
         }
+        
+        coverInner.appendChild(coverDot);
+        cover.appendChild(coverInner);
 
         const meta = document.createElement('div');
         meta.className = 'song-meta';
@@ -1753,36 +1908,325 @@ async function renderSongs() {
         wrapper.appendChild(cover);
         wrapper.appendChild(meta);
 
-        // Add click handler for playing the song
         wrapper.addEventListener('click', async () => {
             await loadSong(item);
-            // Close panel after selecting
             if (songsPanel) {
                 songsPanel.classList.remove('open');
                 songsPanel.setAttribute('aria-hidden', 'true');
             }
         });
 
-        // Add context menu handler
         wrapper.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             contextMenu.show(e.clientX, e.clientY, item);
         });
 
-        songsList.appendChild(wrapper);
+        return wrapper;
     }
 
-    // Animate items from bottom to top with delays
-    const songItems = Array.from(songsList.querySelectorAll('.song-item'));
-    const DELAY_INCREMENT = 50; // 50ms between each animation
-    const BASE_DELAY = 10; // Start first animation after 100ms
+    function createPlaylistItem(playlist, depth = 0) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'playlist-item';
+        wrapper.dataset.id = playlist.id;
+        wrapper.dataset.name = playlist.name || 'Playlist';
+        wrapper.dataset.type = 'playlist';
+        wrapper.tabIndex = 0;
+        wrapper.setAttribute('role', 'group');
+        wrapper.style.setProperty('--nest-depth', String(depth));
 
-    // Reverse the array to start from bottom
-    songItems.reverse().forEach((item, index) => {
-        setTimeout(() => {
-            item.classList.add('animate');
-        }, BASE_DELAY + (index * DELAY_INCREMENT));
+        // Visual header
+        const header = document.createElement('div');
+        header.className = 'playlist-header';
+
+        const cover = document.createElement('div');
+        cover.className = 'playlist-cover';
+        if (playlist.cover instanceof Blob) {
+            const url = URL.createObjectURL(playlist.cover);
+            songCoverObjectUrls.push(url);
+            cover.style.setProperty('--playlist-cover-image', `url('${url}')`);
+        } else {
+            // Use a subtle gradient fallback
+            const g1 = '#222';
+            const g2 = '#111';
+            cover.style.setProperty('--playlist-cover-image', `linear-gradient(135deg, ${g1}, ${g2})`);
+        }
+
+        const meta = document.createElement('div');
+        meta.className = 'playlist-meta';
+        const name = document.createElement('div');
+        name.className = 'playlist-name';
+        name.textContent = playlist.name || 'Playlist';
+        meta.appendChild(name);
+
+        header.appendChild(cover);
+        header.appendChild(meta);
+        wrapper.appendChild(header);
+
+        // Expand/collapse
+        const content = document.createElement('div');
+        content.className = 'playlist-content';
+        wrapper.appendChild(content);
+
+        // Interactions for playlist header
+        header.addEventListener('click', () => {
+            wrapper.classList.toggle('expanded');
+        });
+
+        header.addEventListener('contextmenu', async (e) => {
+            e.preventDefault();
+            await ensurePlaylistContextMenu();
+            window.playlistContextMenu.show(e.clientX, e.clientY, playlist);
+        });
+
+        // Render children: child playlists then songs
+        const childPlaylists = sortByCreatedDesc([...(childrenMap.get(playlist.id) || [])]);
+        const songs = sortByCreatedDesc([...(songsByPlaylist.get(playlist.id) || [])]);
+
+        for (const child of childPlaylists) {
+            const itemEl = createPlaylistItem(child, depth + 1);
+            content.appendChild(itemEl);
+        }
+        for (const s of songs) {
+            const itemEl = createSongItem(s);
+            itemEl.classList.add('in-playlist');
+            content.appendChild(itemEl);
+        }
+
+        return wrapper;
+    }
+
+    // Root: playlists first, then root songs
+    const rootPlaylists = sortByCreatedDesc([...(childrenMap.get('root') || [])]);
+    const rootSongs = sortByCreatedDesc([...(songsByPlaylist.get('root') || [])]);
+
+    for (const pl of rootPlaylists) {
+        songsList.appendChild(createPlaylistItem(pl, 0));
+    }
+    for (const s of rootSongs) {
+        songsList.appendChild(createSongItem(s));
+    }
+
+    // Animate items
+    const items = Array.from(songsList.querySelectorAll('.song-item, .playlist-item'));
+    const DELAY_INCREMENT = 40;
+    const BASE_DELAY = 10;
+    items.reverse().forEach((el, idx) => {
+        setTimeout(() => el.classList.add('animate'), BASE_DELAY + idx * DELAY_INCREMENT);
     });
+
+    // Wire up drag and drop interactions
+    wireDragAndDrop();
+}
+
+// Drag & Drop (long-press) setup
+let dragState = {
+    active: false,
+    type: null, // 'song' | 'playlist'
+    id: null,
+    ghost: null,
+    startX: 0,
+    startY: 0,
+    longPressTimer: null,
+    originEl: null
+};
+
+function wireDragAndDrop() {
+    const songItems = songsList.querySelectorAll('.song-item');
+    const playlistHeaders = songsList.querySelectorAll('.playlist-header');
+
+    songItems.forEach(el => attachDraggable(el, 'song'));
+    playlistHeaders.forEach(header => {
+        const wrapper = header.parentElement;
+        attachDraggable(wrapper, 'playlist', header);
+    });
+
+    // Root drop to move to root
+    songsList.addEventListener('mouseup', handleRootDrop);
+    songsList.addEventListener('touchend', handleRootDrop, { passive: false });
+}
+
+function attachDraggable(containerEl, type, handleEl = null) {
+    const targetEl = handleEl || containerEl;
+    const onMouseDown = (e) => startPress(e, containerEl, type);
+    const onTouchStart = (e) => startPress(e.touches[0], containerEl, type, e);
+    const onMouseUp = cancelPress;
+    const onTouchEnd = cancelPress;
+    targetEl.addEventListener('mousedown', onMouseDown);
+    targetEl.addEventListener('touchstart', onTouchStart, { passive: false });
+    targetEl.addEventListener('mouseup', onMouseUp);
+    targetEl.addEventListener('touchend', onTouchEnd);
+}
+
+function startPress(pointEvent, el, type, rawEvent = null) {
+    if (rawEvent) rawEvent.preventDefault();
+    dragState.startX = pointEvent.clientX;
+    dragState.startY = pointEvent.clientY;
+    dragState.type = type;
+    dragState.originEl = el;
+    dragState.id = el.dataset.id;
+    clearTimeout(dragState.longPressTimer);
+    dragState.longPressTimer = setTimeout(() => beginDrag(pointEvent), 250);
+    document.addEventListener('mousemove', maybeStartDrag);
+    document.addEventListener('touchmove', maybeStartDragTouch, { passive: false });
+    document.addEventListener('mouseup', endDrag);
+    document.addEventListener('touchend', endDrag, { passive: false });
+}
+
+function maybeStartDrag(e) {
+    const dx = e.clientX - dragState.startX;
+    const dy = e.clientY - dragState.startY;
+    if (Math.hypot(dx, dy) > 6) beginDrag(e);
+}
+
+function maybeStartDragTouch(e) {
+    if (!e.touches || e.touches.length === 0) return;
+    const t = e.touches[0];
+    const dx = t.clientX - dragState.startX;
+    const dy = t.clientY - dragState.startY;
+    if (Math.hypot(dx, dy) > 6) beginDrag(t);
+}
+
+function beginDrag(e) {
+    if (dragState.active) return;
+    clearTimeout(dragState.longPressTimer);
+    dragState.active = true;
+    // Create ghost
+    dragState.ghost = document.createElement('div');
+    dragState.ghost.className = 'drag-ghost';
+    dragState.ghost.textContent = dragState.type === 'song' ? 'Song' : 'Playlist';
+    document.body.appendChild(dragState.ghost);
+    moveGhost(e.clientX, e.clientY);
+    document.addEventListener('mousemove', onDragMove);
+    document.addEventListener('touchmove', onDragMoveTouch, { passive: false });
+}
+
+function cancelPress() {
+    clearTimeout(dragState.longPressTimer);
+    document.removeEventListener('mousemove', maybeStartDrag);
+    document.removeEventListener('touchmove', maybeStartDragTouch);
+}
+
+function onDragMove(e) {
+    moveGhost(e.clientX, e.clientY);
+    updateDropTargets(e.clientX, e.clientY);
+}
+
+function onDragMoveTouch(e) {
+    if (!e.touches || e.touches.length === 0) return;
+    const t = e.touches[0];
+    moveGhost(t.clientX, t.clientY);
+    updateDropTargets(t.clientX, t.clientY);
+    e.preventDefault();
+}
+
+function moveGhost(x, y) {
+    if (!dragState.ghost) return;
+    dragState.ghost.style.left = `${x + 12}px`;
+    dragState.ghost.style.top = `${y + 12}px`;
+}
+
+function clearHighlights() {
+    document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+}
+
+function updateDropTargets(x, y) {
+    clearHighlights();
+    const el = document.elementFromPoint(x, y);
+    if (!el) return;
+    const songItem = el.closest('.song-item');
+    const playlistHeader = el.closest('.playlist-header');
+    if (dragState.type === 'song') {
+        if (playlistHeader) playlistHeader.classList.add('drop-target');
+        else if (songItem && songItem !== dragState.originEl) songItem.classList.add('drop-target');
+        if (dragState.ghost) {
+            if (playlistHeader) {
+                const name = playlistHeader.parentElement?.dataset?.name || 'Playlist';
+                dragState.ghost.textContent = `Move to: ${name}`;
+            } else if (songItem && songItem !== dragState.originEl) {
+                const title = songItem.dataset?.title || 'Song';
+                dragState.ghost.textContent = `Group with: ${title}`;
+            } else {
+                dragState.ghost.textContent = 'Move to: Library';
+            }
+        }
+    } else if (dragState.type === 'playlist') {
+        if (playlistHeader) playlistHeader.classList.add('drop-target');
+        if (dragState.ghost) {
+            if (playlistHeader) {
+                const name = playlistHeader.parentElement?.dataset?.name || 'Playlist';
+                dragState.ghost.textContent = `Nest into: ${name}`;
+            } else {
+                dragState.ghost.textContent = 'Move to: Library';
+            }
+        }
+    }
+}
+
+async function endDrag(e) {
+    cancelPress();
+    document.removeEventListener('mousemove', onDragMove);
+    document.removeEventListener('touchmove', onDragMoveTouch);
+    const ghost = dragState.ghost;
+    dragState.ghost = null;
+    if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+
+    if (!dragState.active) {
+        resetDragState();
+        return;
+    }
+    dragState.active = false;
+
+    const x = (e.changedTouches && e.changedTouches[0]?.clientX) || e.clientX;
+    const y = (e.changedTouches && e.changedTouches[0]?.clientY) || e.clientY;
+    const targetEl = document.elementFromPoint(x, y);
+    const songItem = targetEl?.closest('.song-item');
+    const playlistHeader = targetEl?.closest('.playlist-header');
+
+    try {
+        if (dragState.type === 'song') {
+            if (playlistHeader) {
+                const playlistId = playlistHeader.parentElement.dataset.id;
+                await moveSongToPlaylist(dragState.id, playlistId);
+                await cleanupEmptyPlaylists();
+            } else if (songItem && songItem !== dragState.originEl) {
+                // Create a new playlist with both songs
+                const otherSongId = songItem.dataset.id;
+                const otherSong = await idbGet('audio', otherSongId);
+                const thisSong = await idbGet('audio', dragState.id);
+                const newName = `${(thisSong.title || 'Song').slice(0, 12)} + ${(otherSong.title || 'Song').slice(0, 12)}`;
+                // Place new playlist inside target song's parent playlist if exists
+                const parentId = songItem.dataset.playlistId && songItem.dataset.playlistId !== 'root' ? songItem.dataset.playlistId : null;
+                const pl = await createPlaylist({ name: newName, parentId });
+                await moveSongToPlaylist(thisSong.id, pl.id);
+                await moveSongToPlaylist(otherSong.id, pl.id);
+                await cleanupEmptyPlaylists();
+            } else if (songsList.contains(targetEl)) {
+                // Drop to root
+                await moveSongToPlaylist(dragState.id, null);
+                await cleanupEmptyPlaylists();
+            }
+        } else if (dragState.type === 'playlist') {
+            if (playlistHeader && playlistHeader.parentElement.dataset.id !== dragState.id) {
+                const targetId = playlistHeader.parentElement.dataset.id;
+                await movePlaylist(dragState.id, targetId);
+                await cleanupEmptyPlaylists();
+            } else if (songsList.contains(targetEl)) {
+                await movePlaylist(dragState.id, null);
+                await cleanupEmptyPlaylists();
+            }
+        }
+    } finally {
+        clearHighlights();
+        resetDragState();
+    }
+}
+
+function handleRootDrop(e) {
+    // handled in endDrag when target is songsList
+}
+
+function resetDragState() {
+    dragState = { active: false, type: null, id: null, ghost: null, startX: 0, startY: 0, longPressTimer: null, originEl: null };
 }
 
 async function loadSong(recordItem, shouldPlay = true) {
@@ -1833,6 +2277,33 @@ import ContextMenu from './context-menu.js';
 
 // Initialize the context menu
 const contextMenu = new ContextMenu(db);
+
+// Lazy import/instantiate playlist context menu
+let playlistContextMenuInstance = null;
+async function ensurePlaylistContextMenu() {
+    if (playlistContextMenuInstance) return playlistContextMenuInstance;
+    const module = await import('./playlist-context-menu.js');
+    playlistContextMenuInstance = new module.default(db, {
+        onCreate: async (parentId) => {
+            await createPlaylist({ name: null, parentId });
+            await renderSongs();
+        },
+        onRename: async (id, name) => {
+            await renamePlaylist(id, name);
+            await renderSongs();
+        },
+        onDelete: async (id, options) => {
+            await deletePlaylist(id, options);
+            await renderSongs();
+        },
+        onMove: async (id, newParentId) => {
+            await movePlaylist(id, newParentId);
+            await renderSongs();
+        }
+    });
+    window.playlistContextMenu = playlistContextMenuInstance;
+    return playlistContextMenuInstance;
+}
 
 // Combined add music functionality
 const addMusicPanel = document.querySelector('.add-music-panel');
@@ -2419,3 +2890,68 @@ window.processAudioFile = processAudioFile;
 window.renderSongs = renderSongs;
 window.getSetting = getSetting;
 window.updateRecordAppearance = updateRecordAppearance;
+window.createPlaylist = createPlaylist;
+window.renamePlaylist = renamePlaylist;
+window.deletePlaylist = deletePlaylist;
+window.moveSongToPlaylist = moveSongToPlaylist;
+window.movePlaylist = movePlaylist;
+window.updatePlaylist = updatePlaylist;
+
+// Cleanup empty playlists (recursively remove playlists with no songs and no child playlists)
+async function cleanupEmptyPlaylists() {
+    const [playlists, songs] = await Promise.all([
+        idbGetAll('playlists'),
+        idbGetAll('audio')
+    ]);
+    if (!playlists.length) {
+        await renderSongs();
+        return;
+    }
+    const songsByPl = new Map();
+    for (const s of songs) {
+        const key = s.playlistId || null;
+        songsByPl.set(key, (songsByPl.get(key) || 0) + 1);
+    }
+    const childrenByPl = new Map();
+    for (const p of playlists) {
+        const key = p.parentId || null;
+        childrenByPl.set(key, (childrenByPl.get(key) || 0) + 1);
+    }
+    // Iteratively delete empties (affects parents becoming empty after children removed)
+    let deletedAny = false;
+    const toDelete = new Set();
+    while (true) {
+        let found = false;
+        for (const p of playlists) {
+            if (toDelete.has(p.id)) continue;
+            const songCount = songsByPl.get(p.id) || 0;
+            // Children count excluding those already marked for deletion
+            let childCount = 0;
+            for (const c of playlists) {
+                if (toDelete.has(c.id)) continue;
+                if ((c.parentId || null) === p.id) childCount++;
+            }
+            if (songCount === 0 && childCount === 0) {
+                toDelete.add(p.id);
+                found = true;
+            }
+        }
+        if (!found) break;
+        deletedAny = true;
+        // Apply deletions
+        for (const id of toDelete) {
+            // Only delete once
+            const idx = playlists.findIndex(pp => pp.id === id);
+            if (idx !== -1) {
+                await idbDelete('playlists', id);
+            }
+        }
+        break; // One pass is enough since we recompute parent childCount above excluding toDelete
+    }
+    if (deletedAny) {
+        await renderSongs();
+    } else {
+        await renderSongs();
+    }
+}
+window.cleanupEmptyPlaylists = cleanupEmptyPlaylists;

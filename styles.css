@@ -383,7 +383,7 @@ h1, h2, h3, h4, h5, h6 {
 .songs-button {
     position: fixed;
     bottom: 24px;
-    right: 24px;
+    right: 48px;
     width: 48px;
     height: 48px;
     border-radius: 12px;
@@ -435,7 +435,8 @@ h1, h2, h3, h4, h5, h6 {
     position: fixed;
     bottom: 90px;
     right: 24px;
-    overflow: hidden;
+    overflow-x: visible;
+    overflow-y: hidden;
     opacity: 0;
     display: none;
     z-index: 1100;
@@ -455,9 +456,28 @@ h1, h2, h3, h4, h5, h6 {
 
 .songs-list {
     display: flex;
+    padding: 10px;
     flex-direction: column;
     max-height: calc(100vh - 220px);
     gap: 12px;
+    overflow-x: visible;
+    overflow-y: auto;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE 10+ */
+    mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,0.6) 12px, #000 32px, #000 calc(100% - 32px), rgba(0,0,0,0.6) calc(100% - 12px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,0.6) 12px, #000 32px, #000 calc(100% - 32px), rgba(0,0,0,0.6) calc(100% - 12px), transparent 100%);
+}
+
+.songs-list::-webkit-scrollbar { display: none; }
+
+/* Hide scrollbars for all child elements of songs-panel */
+.songs-panel * {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE 10+ */
+}
+
+.songs-panel *::-webkit-scrollbar { 
+    display: none; 
 }
 
 .song-item {
@@ -488,6 +508,24 @@ h1, h2, h3, h4, h5, h6 {
     transform-origin: center right;
 }
 
+.drop-target {
+    outline: 1px dashed rgba(255,255,255,0.35);
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.22) 100%) !important;
+}
+
+.drag-ghost {
+    position: fixed;
+    pointer-events: none;
+    z-index: 200000;
+    background: rgba(30,30,30,0.9);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: #fff;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+}
+
 /* Add new keyframes for song item animation */
 @keyframes slideInFade {
     from {
@@ -501,15 +539,194 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .song-cover {
+    position: relative;
     width: 48px;
     height: 48px;
     flex-shrink: 0;
-    border-radius: 8px;
+    border-radius: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #000000;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.8);
+    background:
+      /* Grooves 1 */
+      repeating-radial-gradient(
+        circle at center,
+        rgba(255, 255, 255, 0.04) 0px,
+        rgba(255, 255, 255, 0.02) 1px,
+        rgba(0, 0, 0, 0) 60px
+      ),
+      /* Grooves 2*/
+      repeating-radial-gradient(
+        circle at center,
+        rgba(255, 255, 255, 0.03) 0px,
+        rgba(255, 255, 255, 0.03) 1px,
+        rgba(0, 0, 0, 0) 4px
+      ),
+      /* Light reflection 1 */
+      conic-gradient(
+        from 235deg at 50% 50%,
+        rgba(130, 130, 130, 0.55) 0deg,
+        rgba(20, 20, 20, 0.44) 33.54deg,
+        rgba(0, 0, 0, 0.40) 151.56deg,
+        rgba(130, 130, 130, 0.55) 180deg,
+        rgba(0, 0, 0, 0.40) 202.54deg,
+        rgba(0, 0, 0, 0.40) 325.48deg,
+        rgba(130, 130, 130, 0.55) 360deg
+      ),
+      /* Light reflection 2*/
+      conic-gradient(
+        from 100deg at 50% 50%,
+        rgba(105, 105, 105, 0.50) 0deg,
+        rgba(1, 1, 1, 0.40) 33.54deg,
+        rgba(0, 0, 0, 0.40) 151.56deg,
+        rgba(105, 105, 105, 0.50) 180deg,
+        rgba(0, 0, 0, 0.40) 202.54deg,
+        rgba(0, 0, 0, 0.40) 325.48deg,
+        rgba(105, 105, 105, 0.50) 360deg
+      ),
+      linear-gradient(135deg, #000000 0%, #000000a2 100%),
+      #000000;
+    transition: scale 0.2s ease;
+}
+
+.song-cover-inner {
+    width: 20px;
+    height: 20px;
+    position: relative;
+    border-radius: 100%;
     background-size: 110%;
     background-position: center;
-    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 0 0 2px #00000042;
+    animation: unblurRecord 900ms ease forwards;
+}
+
+.song-cover-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px;
+    height: 2px;
+    background: #000000;
+    border-radius: 100%;
+}
+
+/* Playlist visuals */
+.playlist-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-radius: 8px;
+    background: transparent;
+    transform: translateX(20px);
+    opacity: 0;
+    overflow: visible;
+}
+
+.playlist-item.animate { animation: slideInFade 0.3s ease forwards; }
+
+.playlist-header {
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: center;
+    justify-content: start;
+    gap: 12px;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    background: transparent;
+    padding: 8px;
+    padding-right: 10px;
+    overflow: visible;
+}
+
+.playlist-header:hover, .playlist-item:focus-within .playlist-header {
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.18) 100%);
+    scale: 1.02;
+}
+
+.playlist-cover {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border-radius: 4px;
+    overflow: visible;
+    background: var(--playlist-cover-image, linear-gradient(135deg, #222, #111));
+    background-size: 110%;
+    background-position: center;
+    background-repeat: no-repeat;
+    border: 1px solid rgb(43, 43, 43);
     box-shadow: 0 4px 14px rgba(0,0,0,0.35);
 }
+
+/* Peeking record aesthetic */
+.playlist-cover::before {
+    content: '';
+    position: absolute;
+    right: -18px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background:
+      /* Grooves 1 */
+      repeating-radial-gradient(
+        circle at center,
+        rgba(255, 255, 255, 0.04) 0px,
+        rgba(255, 255, 255, 0.02) 1px,
+        rgba(0, 0, 0, 0) 60px
+      ),
+      /* Grooves 2*/
+      repeating-radial-gradient(
+        circle at center,
+        rgba(255, 255, 255, 0.03) 0px,
+        rgba(255, 255, 255, 0.03) 1px,
+        rgba(0, 0, 0, 0) 4px
+      ),
+      /* Light reflection 1 */
+      conic-gradient(
+        from 235deg at 50% 50%,
+        rgba(130, 130, 130, 0.55) 0deg,
+        rgba(20, 20, 20, 0.44) 33.54deg,
+        rgba(0, 0, 0, 0.40) 151.56deg,
+        rgba(130, 130, 130, 0.55) 180deg,
+        rgba(0, 0, 0, 0.40) 202.54deg,
+        rgba(0, 0, 0, 0.40) 325.48deg,
+        rgba(130, 130, 130, 0.55) 360deg
+      ),
+      /* Light reflection 2*/
+      conic-gradient(
+        from 100deg at 50% 50%,
+        rgba(105, 105, 105, 0.50) 0deg,
+        rgba(1, 1, 1, 0.40) 33.54deg,
+        rgba(0, 0, 0, 0.40) 151.56deg,
+        rgba(105, 105, 105, 0.50) 180deg,
+        rgba(0, 0, 0, 0.40) 202.54deg,
+        rgba(0, 0, 0, 0.40) 325.48deg,
+        rgba(105, 105, 105, 0.50) 360deg
+      ),
+      linear-gradient(135deg, #222 0%, #222a 100%),
+      #222;
+    z-index: -1;
+}
+
+.playlist-meta { text-align: right; font-size: 12px; line-height: 1.2; }
+.playlist-name { opacity: 0.95; }
+
+.playlist-content {
+    display: none;
+    padding-left: calc(8px + (var(--nest-depth, 0) * 8px));
+    border-left: 1px dashed rgba(255,255,255,0.1);
+    margin-left: 8px;
+}
+
+.playlist-item.expanded > .playlist-content { display: flex; flex-direction: column; gap: 8px; }
+
+.song-item.in-playlist { padding-right: 10px; }
 
 .song-meta {
     font-size: 12px;
@@ -844,7 +1061,7 @@ h1, h2, h3, h4, h5, h6 {
 .add-music-panel {
     width: 30px;
     height: 30px;
-    margin: 6px;
+    margin: 18px;
     display: flex;
     align-items: center;
     justify-content: center;
