@@ -28,9 +28,11 @@ const isProduction = process.env.NODE_ENV === 'production';
 // Helper function to check if yt-dlp is installed
 function checkYtDlp() {
     return new Promise((resolve) => {
-        const ytdlp = spawn('yt-dlp', ['--version']);
+        const ytdlpPath = path.join(__dirname, 'bin', 'yt-dlp');
+        const ytdlp = spawn(ytdlpPath, ['--version']);
         
-        ytdlp.on('error', () => {
+        ytdlp.on('error', (err) => {
+            console.error('yt-dlp check error:', err.message);
             resolve(false);
         });
         
@@ -355,8 +357,9 @@ app.post('/api/youtube-convert', youtubeDownloadLimiter, async (req, res) => {
         // Generate output filename
         outputFile = path.join(tempDir, `${generateTempFilename()}.mp3`);
 
-        // Download and convert using yt-dlp
-        const ytdlp = spawn('yt-dlp', [
+        // Download and convert using yt-dlp from local bin
+        const ytdlpPath = path.join(__dirname, 'bin', 'yt-dlp');
+        const ytdlp = spawn(ytdlpPath, [
             '--extract-audio',
             '--audio-format', 'mp3',
             '--audio-quality', '0',  // Best quality
@@ -488,8 +491,9 @@ app.get('/api/youtube-metadata/:videoId', youtubeMetadataLimiter, async (req, re
         const url = `https://www.youtube.com/watch?v=${videoId}`;
         console.log('Attempting to fetch video info for:', url);
 
-        // Get video metadata using yt-dlp
-        const ytdlp = spawn('yt-dlp', [
+        // Get video metadata using yt-dlp from local bin
+        const ytdlpPath = path.join(__dirname, 'bin', 'yt-dlp');
+        const ytdlp = spawn(ytdlpPath, [
             '--dump-json',
             '--no-playlist',
             url
