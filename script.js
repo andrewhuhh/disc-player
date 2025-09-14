@@ -3039,8 +3039,8 @@ async function processGeneratedMusic(file, prompt) {
         const gradient = generateRandomGradient();
 
         // Generate creative title and author using the free LLM service
-        let title = 'Generated Music';
-        let artist = 'AI Artist';
+        let title = 'UNTITLED';
+        let artist = 'UNKNOWN';
         let coverImageBlob = null;
         
         try {

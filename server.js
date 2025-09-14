@@ -51,8 +51,15 @@ async function resolveYtDlpPath() {
         }
     }
 
-    // Common installation paths to check
-    const commonPaths = ['/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp'];
+    // Common installation paths to check based on platform
+    const isWindows = process.platform === 'win32';
+    const commonPaths = isWindows 
+        ? [
+            path.join(process.env.APPDATA || '', 'Python', 'Python312', 'Scripts', 'yt-dlp.exe'),
+            path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'Scripts', 'yt-dlp.exe'),
+            'C:\\Python312\\Scripts\\yt-dlp.exe'
+        ]
+        : ['/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp'];
     
     for (const commonPath of commonPaths) {
         try {
@@ -79,19 +86,45 @@ async function resolveYtDlpPath() {
     // Final fallback: try python module execution
     try {
         console.log('Trying yt-dlp as Python module...');
-        // Test if python3 -m yt_dlp works
-        const testPython = spawn('python3', ['-m', 'yt_dlp', '--version']);
-        
-        const pythonWorked = await new Promise((resolve) => {
-            testPython.on('error', () => resolve(false));
-            testPython.on('close', (code) => resolve(code === 0));
-        });
-        
-        if (pythonWorked) {
-            console.log('Found yt-dlp as Python module');
-            ytdlpPath = 'python3 -m yt_dlp'; // Special marker for Python module
-            return ytdlpPath;
+        // Test if python/python3 -m yt_dlp works
+        const pythonCommands = process.platform === 'win32' 
+            ? ['python', 'py'] 
+            : ['python3', 'python'];
+
+        for (const cmd of pythonCommands) {
+            try {
+                console.log(`Trying Python command: ${cmd}`);
+                const testPython = spawn(cmd, ['-m', 'yt_dlp', '--version']);
+                
+                const pythonWorked = await new Promise((resolve) => {
+                    let output = '';
+                    testPython.stdout.on('data', (data) => {
+                        output += data;
+                    });
+                    testPython.stderr.on('data', (data) => {
+                        console.log(`${cmd} stderr:`, data.toString());
+                    });
+                    testPython.on('error', (err) => {
+                        console.log(`${cmd} error:`, err.message);
+                        resolve(false);
+                    });
+                    testPython.on('close', (code) => {
+                        console.log(`${cmd} exit code:`, code);
+                        console.log(`${cmd} output:`, output);
+                        resolve(code === 0);
+                    });
+                });
+                
+                if (pythonWorked) {
+                    console.log(`Found yt-dlp as Python module using ${cmd}`);
+                    ytdlpPath = `${cmd} -m yt_dlp`; // Special marker for Python module
+                    return ytdlpPath;
+                }
+            } catch (cmdError) {
+                console.log(`Failed to execute ${cmd}:`, cmdError.message);
+            }
         }
+        throw new Error('No Python command succeeded');
     } catch (error) {
         console.error('Python module fallback failed:', error.message);
     }
