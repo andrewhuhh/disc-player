@@ -5,10 +5,17 @@ const fs = require('fs');
 const crypto = require('crypto');
 const cors = require('cors');
 const ytdl = require('ytdl-core');
-const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('ffmpeg-static');
-const NodeID3 = require('node-id3');
 require('dotenv').config();
+
+// Optional dependencies for local development
+let ffmpeg, ffmpegPath, NodeID3;
+try {
+    ffmpeg = require('fluent-ffmpeg');
+    ffmpegPath = require('ffmpeg-static');
+    NodeID3 = require('node-id3');
+} catch (error) {
+    console.warn('Optional dependencies not available for local development:', error.message);
+}
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -238,23 +245,33 @@ app.post('/api/youtube-convert', async (req, res) => {
         });
 
         // Convert to MP3 with ffmpeg and add ID3 tags
-        await new Promise((resolve, reject) => {
-            ffmpeg(audioStream)
-                .setFfmpegPath(ffmpegPath)
-                .audioBitrate(128)
-                .audioChannels(2)
-                .audioFrequency(44100)
-                .toFormat('mp3')
-                .on('error', (err) => {
-                    console.error('FFmpeg error:', err);
-                    reject(err);
-                })
-                .on('end', () => {
-                    console.log('Audio conversion completed');
-                    resolve();
-                })
-                .save(outputFile);
-        });
+        if (ffmpeg && ffmpegPath) {
+            await new Promise((resolve, reject) => {
+                ffmpeg(audioStream)
+                    .setFfmpegPath(ffmpegPath)
+                    .audioBitrate(128)
+                    .audioChannels(2)
+                    .audioFrequency(44100)
+                    .toFormat('mp3')
+                    .on('error', (err) => {
+                        console.error('FFmpeg error:', err);
+                        reject(err);
+                    })
+                    .on('end', () => {
+                        console.log('Audio conversion completed');
+                        resolve();
+                    })
+                    .save(outputFile);
+            });
+        } else {
+            // Fallback: stream audio directly without conversion
+            const chunks = [];
+            for await (const chunk of audioStream) {
+                chunks.push(chunk);
+            }
+            const audioBuffer = Buffer.concat(chunks);
+            fs.writeFileSync(outputFile, audioBuffer);
+        }
 
         // Check if file exists and has size
         if (!fs.existsSync(outputFile) || fs.statSync(outputFile).size === 0) {
@@ -262,21 +279,25 @@ app.post('/api/youtube-convert', async (req, res) => {
         }
 
         // Add ID3 tags to the MP3 file
-        try {
-            const id3Tags = {
-                title: extractedMetadata.title,
-                artist: extractedMetadata.artist,
-                album: extractedMetadata.album,
-                year: extractedMetadata.year,
-                genre: 'YouTube'
-            };
+        if (NodeID3) {
+            try {
+                const id3Tags = {
+                    title: extractedMetadata.title,
+                    artist: extractedMetadata.artist,
+                    album: extractedMetadata.album,
+                    year: extractedMetadata.year,
+                    genre: 'YouTube'
+                };
 
-            console.log('Adding ID3 tags:', id3Tags);
-            NodeID3.update(id3Tags, outputFile);
-            console.log('ID3 tags added successfully');
-        } catch (tagError) {
-            console.warn('Failed to add ID3 tags:', tagError);
-            // Continue without tags rather than failing
+                console.log('Adding ID3 tags:', id3Tags);
+                NodeID3.update(id3Tags, outputFile);
+                console.log('ID3 tags added successfully');
+            } catch (tagError) {
+                console.warn('Failed to add ID3 tags:', tagError);
+                // Continue without tags rather than failing
+            }
+        } else {
+            console.log('ID3 tagging not available - skipping metadata tags');
         }
 
         // Set proper headers with metadata

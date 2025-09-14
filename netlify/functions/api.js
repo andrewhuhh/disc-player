@@ -3,9 +3,6 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const ytdl = require('ytdl-core');
-const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('ffmpeg-static');
-const NodeID3 = require('node-id3');
 
 // Helper to generate safe temporary filenames
 function generateTempFilename() {
@@ -63,6 +60,20 @@ exports.handler = async (event, context) => {
         const endpoint = pathParts[pathParts.length - 1];
         
         switch (endpoint) {
+            case 'health':
+                if (httpMethod === 'GET') {
+                    return {
+                        statusCode: 200,
+                        headers: corsHeaders,
+                        body: JSON.stringify({ 
+                            status: 'ok', 
+                            timestamp: new Date().toISOString(),
+                            environment: process.env.NODE_ENV || 'development'
+                        })
+                    };
+                }
+                break;
+                
             case 'youtube-convert':
                 if (httpMethod === 'POST') {
                     return await handleYouTubeConvert(JSON.parse(body || '{}'));
@@ -137,8 +148,6 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
         };
     }
 
-    const outputFile = path.join(tempDir, `${generateTempFilename()}.mp3`);
-
     try {
         // Validate YouTube URL
         if (!ytdl.validateURL(url)) {
@@ -167,56 +176,22 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
             filter: 'audioonly'
         });
 
-        // Convert to MP3 with ffmpeg and add ID3 tags
-        await new Promise((resolve, reject) => {
-            ffmpeg(audioStream)
-                .setFfmpegPath(ffmpegPath)
-                .audioBitrate(128)
-                .audioChannels(2)
-                .audioFrequency(44100)
-                .toFormat('mp3')
-                .on('error', (err) => {
-                    console.error('FFmpeg error:', err);
-                    reject(err);
-                })
-                .on('end', () => {
-                    console.log('Audio conversion completed');
-                    resolve();
-                })
-                .save(outputFile);
-        });
-
-        // Check if file exists and has size
-        if (!fs.existsSync(outputFile) || fs.statSync(outputFile).size === 0) {
-            throw new Error('Conversion produced no output file');
+        // Collect audio data chunks
+        const chunks = [];
+        for await (const chunk of audioStream) {
+            chunks.push(chunk);
         }
 
-        // Add ID3 tags to the MP3 file
-        try {
-            const id3Tags = {
-                title: extractedMetadata.title,
-                artist: extractedMetadata.artist,
-                album: extractedMetadata.album,
-                year: extractedMetadata.year,
-                genre: 'YouTube'
-            };
+        // Combine chunks into a single buffer
+        const audioBuffer = Buffer.concat(chunks);
 
-            console.log('Adding ID3 tags:', id3Tags);
-            NodeID3.update(id3Tags, outputFile);
-            console.log('ID3 tags added successfully');
-        } catch (tagError) {
-            console.warn('Failed to add ID3 tags:', tagError);
-            // Continue without tags rather than failing
+        if (audioBuffer.length === 0) {
+            throw new Error('No audio data received');
         }
 
-        // Read the file and return it
-        const fileBuffer = fs.readFileSync(outputFile);
         const safeTitle = extractedMetadata.title.replace(/[^\w\s-]/g, '').trim();
         const safeArtist = extractedMetadata.artist.replace(/[^\w\s-]/g, '').trim();
         const filename = `${safeArtist} - ${safeTitle}.mp3`.substring(0, 200);
-
-        // Clean up the temp file
-        fs.unlinkSync(outputFile);
 
         return {
             statusCode: 200,
@@ -226,9 +201,9 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
                 'Content-Disposition': `attachment; filename="${filename}"`,
                 'X-Video-Title': extractedMetadata.title,
                 'X-Video-Artist': extractedMetadata.artist,
-                'Content-Length': fileBuffer.length.toString()
+                'Content-Length': audioBuffer.length.toString()
             },
-            body: fileBuffer.toString('base64'),
+            body: audioBuffer.toString('base64'),
             isBase64Encoded: true
         };
 
@@ -245,11 +220,6 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
             errorMessage = 'Video is age-restricted and cannot be downloaded';
         } else if (error.message.includes('region')) {
             errorMessage = 'Video is not available in your region';
-        }
-
-        // Clean up on error
-        if (fs.existsSync(outputFile)) {
-            fs.unlinkSync(outputFile);
         }
 
         return {

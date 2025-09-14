@@ -1,0 +1,9 @@
+{
+  "name": "netlify-functions",
+  "version": "1.0.0",
+  "description": "Netlify serverless functions for music player",
+  "main": "api.js",
+  "dependencies": {
+    "ytdl-core": "^4.11.5"
+  }
+}
