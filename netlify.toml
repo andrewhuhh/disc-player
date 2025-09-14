@@ -19,7 +19,7 @@
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["@distube/ytdl-core"]
+  external_node_modules = ["@distube/ytdl-core", "buffer"]
   included_files = ["netlify/functions/node_modules/@distube/ytdl-core/**/*"]
 
 [functions.api]

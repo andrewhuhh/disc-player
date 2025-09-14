@@ -5,6 +5,25 @@ const crypto = require('crypto');
 const ytdl = require('@distube/ytdl-core');
 const fetch = require('node-fetch');
 
+// Polyfill File class for Node environment
+if (typeof File === 'undefined') {
+    global.File = class File {
+        constructor(bits, name, options = {}) {
+            this.bits = bits;
+            this.name = name;
+            this.options = options;
+            this.type = options.type || '';
+            this.size = bits.reduce((acc, bit) => acc + (bit.length || bit.size || 0), 0);
+            this.lastModified = options.lastModified || Date.now();
+        }
+    };
+}
+
+// Polyfill Blob if needed
+if (typeof Blob === 'undefined') {
+    global.Blob = require('buffer').Blob;
+}
+
 // Helper to generate safe temporary filenames
 function generateTempFilename() {
     return crypto.randomBytes(16).toString('hex');
@@ -145,7 +164,13 @@ exports.handler = async (event, context) => {
 
 // YouTube conversion handler
 async function handleYouTubeConvert({ url, videoId, metadata }) {
+    console.log('Starting YouTube conversion for URL:', url);
+    console.log('Environment:', process.env.NODE_ENV);
+    console.log('Node version:', process.version);
+    console.log('Available globals:', Object.keys(global));
+
     if (!url) {
+        console.log('No URL provided');
         return {
             statusCode: 400,
             headers: corsHeaders,
@@ -155,13 +180,26 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
 
     try {
         // Validate YouTube URL
+        console.log('Validating YouTube URL...');
         if (!ytdl.validateURL(url)) {
             throw new Error('Invalid YouTube URL');
         }
 
         // Get video metadata using ytdl-core
         console.log('Fetching video metadata...');
-        const info = await ytdl.getInfo(url);
+        const info = await ytdl.getInfo(url).catch(err => {
+            console.error('ytdl.getInfo error:', err);
+            console.error('Error stack:', err.stack);
+            throw err;
+        });
+        
+        console.log('Video info received:', {
+            title: info.videoDetails.title,
+            length: info.videoDetails.lengthSeconds,
+            available: info.videoDetails.availableCountries?.length || 0,
+            formats: info.formats.length
+        });
+
         const videoDetails = info.videoDetails;
         
         // Extract metadata
@@ -175,8 +213,24 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
 
         console.log('Extracted metadata:', extractedMetadata);
 
-        // Choose best audio-only format to set accurate headers/extension
+        // Choose best audio-only format
+        console.log('Selecting best audio format...');
+        const formats = info.formats.filter(f => f.hasAudio && !f.hasVideo);
+        console.log('Available audio formats:', formats.map(f => ({
+            itag: f.itag,
+            container: f.container,
+            quality: f.quality,
+            bitrate: f.bitrate
+        })));
+
         const selectedFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' });
+        console.log('Selected format:', {
+            itag: selectedFormat.itag,
+            container: selectedFormat.container,
+            quality: selectedFormat.quality,
+            bitrate: selectedFormat.bitrate
+        });
+
         const container = selectedFormat?.container || '';
         const codecs = selectedFormat?.codecs || '';
         const isWebm = container === 'webm' || /opus/i.test(codecs);
@@ -184,6 +238,7 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
         const fileExtension = isWebm ? 'webm' : 'm4a';
 
         // Get the best audio stream
+        console.log('Starting audio stream download...');
         const audioStream = ytdl(url, { 
             quality: 'highestaudio',
             filter: 'audioonly',
@@ -195,14 +250,29 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
             }
         });
 
-        // Collect audio data chunks
+        // Add stream error handling
+        audioStream.on('error', (err) => {
+            console.error('Audio stream error:', err);
+            console.error('Error stack:', err.stack);
+        });
+
+        // Collect audio data chunks with progress logging
         const chunks = [];
+        let totalSize = 0;
+        console.log('Collecting audio chunks...');
+        
         for await (const chunk of audioStream) {
             chunks.push(chunk);
+            totalSize += chunk.length;
+            if (totalSize % (1024 * 1024) === 0) { // Log every MB
+                console.log(`Downloaded: ${totalSize / (1024 * 1024)} MB`);
+            }
         }
 
         // Combine chunks into a single buffer
+        console.log('Combining audio chunks...');
         const audioBuffer = Buffer.concat(chunks);
+        console.log('Final audio size:', audioBuffer.length / (1024 * 1024), 'MB');
 
         if (audioBuffer.length === 0) {
             throw new Error('No audio data received');
@@ -212,6 +282,7 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
         const safeArtist = extractedMetadata.artist.replace(/[^\w\s-]/g, '').trim();
         const filename = `${safeArtist} - ${safeTitle}.${fileExtension}`.substring(0, 200);
 
+        console.log('Conversion successful, sending response...');
         return {
             statusCode: 200,
             headers: {
@@ -228,25 +299,46 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
 
     } catch (error) {
         console.error('YouTube conversion error:', error);
+        console.error('Error stack:', error.stack);
+        console.error('Error details:', {
+            name: error.name,
+            message: error.message,
+            code: error.code,
+            statusCode: error.statusCode
+        });
         
         // Provide more specific error messages
         let errorMessage = 'Conversion failed';
+        let statusCode = 500;
+
         if (error.message.includes('Invalid YouTube URL')) {
             errorMessage = 'Invalid YouTube URL provided';
+            statusCode = 400;
         } else if (error.message.includes('Video unavailable')) {
             errorMessage = 'Video is unavailable or private';
+            statusCode = 404;
         } else if (error.message.includes('age-restricted')) {
             errorMessage = 'Video is age-restricted and cannot be downloaded';
+            statusCode = 403;
         } else if (error.message.includes('region')) {
             errorMessage = 'Video is not available in your region';
+            statusCode = 451;
+        } else if (error.message.includes('Too many requests')) {
+            errorMessage = 'Rate limit exceeded';
+            statusCode = 429;
         }
 
         return {
-            statusCode: 500,
+            statusCode,
             headers: corsHeaders,
             body: JSON.stringify({ 
                 error: errorMessage,
-                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+                details: process.env.NODE_ENV === 'development' ? {
+                    message: error.message,
+                    stack: error.stack,
+                    code: error.code,
+                    statusCode: error.statusCode
+                } : undefined
             })
         };
     }
@@ -254,7 +346,12 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
 
 // YouTube metadata handler
 async function handleYouTubeMetadata(videoId) {
+    console.log('Starting metadata fetch for video ID:', videoId);
+    console.log('Environment:', process.env.NODE_ENV);
+    console.log('Node version:', process.version);
+
     if (!videoId || videoId === 'unknown') {
+        console.log('Invalid video ID provided:', videoId);
         return {
             statusCode: 400,
             headers: corsHeaders,
@@ -264,17 +361,33 @@ async function handleYouTubeMetadata(videoId) {
 
     try {
         const url = `https://www.youtube.com/watch?v=${videoId}`;
+        console.log('Constructed URL:', url);
         
         // Validate URL
+        console.log('Validating YouTube URL...');
         if (!ytdl.validateURL(url)) {
             throw new Error('Invalid YouTube URL');
         }
 
-        // Get video info
-        const info = await ytdl.getInfo(url);
+        // Get video info with error handling
+        console.log('Fetching video info...');
+        const info = await ytdl.getInfo(url).catch(err => {
+            console.error('ytdl.getInfo error:', err);
+            console.error('Error stack:', err.stack);
+            throw err;
+        });
+        
+        console.log('Video info received:', {
+            title: info.videoDetails.title,
+            length: info.videoDetails.lengthSeconds,
+            available: info.videoDetails.availableCountries?.length || 0,
+            formats: info.formats.length
+        });
+
         const videoDetails = info.videoDetails;
         
-        // Extract metadata
+        // Extract metadata with detailed logging
+        console.log('Extracting metadata...');
         const metadata = {
             title: videoDetails.title || 'Unknown Title',
             author: videoDetails.author?.name || 'Unknown Artist',
@@ -285,6 +398,8 @@ async function handleYouTubeMetadata(videoId) {
             viewCount: parseInt(videoDetails.viewCount) || 0
         };
 
+        console.log('Extracted metadata:', metadata);
+
         return {
             statusCode: 200,
             headers: corsHeaders,
@@ -293,22 +408,42 @@ async function handleYouTubeMetadata(videoId) {
 
     } catch (error) {
         console.error('YouTube metadata error:', error);
+        console.error('Error stack:', error.stack);
+        console.error('Error details:', {
+            name: error.name,
+            message: error.message,
+            code: error.code,
+            statusCode: error.statusCode
+        });
         
         let errorMessage = 'Failed to fetch video metadata';
+        let statusCode = 500;
+
         if (error.message.includes('Video unavailable')) {
             errorMessage = 'Video is unavailable or private';
+            statusCode = 404;
         } else if (error.message.includes('age-restricted')) {
             errorMessage = 'Video is age-restricted';
+            statusCode = 403;
         } else if (error.message.includes('region')) {
             errorMessage = 'Video is not available in your region';
+            statusCode = 451;
+        } else if (error.message.includes('Too many requests')) {
+            errorMessage = 'Rate limit exceeded';
+            statusCode = 429;
         }
 
         return {
-            statusCode: 500,
+            statusCode,
             headers: corsHeaders,
             body: JSON.stringify({ 
                 error: errorMessage,
-                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+                details: process.env.NODE_ENV === 'development' ? {
+                    message: error.message,
+                    stack: error.stack,
+                    code: error.code,
+                    statusCode: error.statusCode
+                } : undefined
             })
         };
     }
