@@ -31,6 +31,35 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
+// Root API info endpoint
+app.get('/api/', (req, res) => {
+    res.json({ 
+        status: 'ok',
+        service: 'Record Player API',
+        version: '1.0.0',
+        endpoints: [
+            '/api/youtube-metadata/:videoId',
+            '/api/youtube-convert',
+            '/api/generate-music',
+            '/api/generate-cover-image',
+            '/api/generate-song-metadata',
+            '/api/proxy-audio',
+            '/api/health'
+        ]
+    });
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        environment: isProduction ? 'production' : 'development',
+        node_version: process.version,
+        platform: process.platform
+    });
+});
+
 // Security middleware for production
 if (isProduction) {
     const helmet = require('helmet');
