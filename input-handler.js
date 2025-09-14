@@ -64,13 +64,18 @@ class InputHandler {
     async handleYouTubeUrl(url) {
         try {
             const loadingIndicator = document.querySelector('.loading-indicator');
-            loadingIndicator.classList.add('active');
+            if (loadingIndicator) {
+                loadingIndicator.classList.add('active');
+            }
 
             // Extract video ID and get metadata
             const videoId = this.extractYouTubeVideoId(url);
             console.log('Extracted video ID:', videoId);
 
-            const metadata = await this.fetchYouTubeMetadata(videoId);
+            // Get the API base URL based on environment
+            const apiBaseUrl = this.getApiBaseUrl();
+            
+            const metadata = await this.fetchYouTubeMetadata(videoId, apiBaseUrl);
             console.log('Fetched metadata:', metadata);
 
             let filename;
@@ -84,7 +89,7 @@ class InputHandler {
             }
 
             // Make request to our backend conversion service
-            const response = await fetch('http://localhost:3000/api/youtube-convert', {
+            const response = await fetch(`${apiBaseUrl}/api/youtube-convert`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -97,12 +102,22 @@ class InputHandler {
             });
 
             if (!response.ok) {
-                throw new Error('YouTube conversion failed');
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `YouTube conversion failed with status ${response.status}`);
             }
 
             const blob = await response.blob();
             if (!blob.type.startsWith('audio/')) {
                 throw new Error('Invalid audio file received');
+            }
+
+            // Get filename from response headers if available
+            const contentDisposition = response.headers.get('Content-Disposition');
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
+                if (filenameMatch) {
+                    filename = filenameMatch[1];
+                }
             }
 
             const file = new File([blob], filename, { type: blob.type });
@@ -122,27 +137,40 @@ class InputHandler {
         } catch (error) {
             console.error('YouTube conversion error:', error);
             if (window.errorHandler) {
-                window.errorHandler.showError('Failed to convert YouTube video. Please try again later.', {
+                window.errorHandler.showError(error.message || 'Failed to convert YouTube video. Please try again later.', {
                     title: 'YouTube Conversion Failed',
                     duration: 6000
                 });
             } else {
-                alert('Failed to convert YouTube video. Please try again later.');
+                alert(error.message || 'Failed to convert YouTube video. Please try again later.');
             }
         } finally {
             const loadingIndicator = document.querySelector('.loading-indicator');
-            loadingIndicator.classList.remove('active');
+            if (loadingIndicator) {
+                loadingIndicator.classList.remove('active');
+            }
         }
     }
 
-    async fetchYouTubeMetadata(videoId) {
+    getApiBaseUrl() {
+        // Determine API base URL based on environment
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            return 'http://localhost:3000';
+        } else {
+            // For Netlify deployment, use the same origin
+            return window.location.origin;
+        }
+    }
+
+    async fetchYouTubeMetadata(videoId, apiBaseUrl) {
         try {
             console.log('Fetching metadata for video ID:', videoId);
-            const response = await fetch(`http://localhost:3000/api/youtube-metadata/${videoId}`);
+            const response = await fetch(`${apiBaseUrl}/api/youtube-metadata/${videoId}`);
             
             if (!response.ok) {
                 console.error('Metadata fetch failed with status:', response.status);
-                throw new Error('Failed to fetch video metadata');
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || 'Failed to fetch video metadata');
             }
 
             const data = await response.json();
@@ -170,8 +198,11 @@ class InputHandler {
 
     async handleDirectAudioUrl(url) {
         try {
+            // Get the API base URL based on environment
+            const apiBaseUrl = this.getApiBaseUrl();
+            
             // Instead of fetching directly, go through your backend proxy
-            const response = await fetch('http://localhost:3000/api/proxy-audio', {
+            const response = await fetch(`${apiBaseUrl}/api/proxy-audio`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -179,7 +210,10 @@ class InputHandler {
                 body: JSON.stringify({ url })
             });
 
-            if (!response.ok) throw new Error('Failed to fetch audio');
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || 'Failed to fetch audio');
+            }
             
             const blob = await response.blob();
             if (!blob.type.startsWith('audio/')) {

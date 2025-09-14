@@ -1,53 +1,21 @@
-const express = require('express');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const cors = require('cors');
 const ytdl = require('ytdl-core');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const NodeID3 = require('node-id3');
-require('dotenv').config();
-
-const app = express();
-const port = process.env.PORT || 3000;
-const isProduction = process.env.NODE_ENV === 'production';
-
-// Configure CORS based on environment
-const corsOptions = {
-    origin: isProduction 
-        ? ['https://myrecordplayer.netlify.app']
-        : ['http://localhost:3000', 'http://127.0.0.1:3000'],
-    methods: ['GET', 'POST'],
-    credentials: true
-};
-app.use(cors(corsOptions));
-
-// Security middleware for production
-if (isProduction) {
-    const helmet = require('helmet');
-    app.use(helmet({
-        contentSecurityPolicy: false, // Disabled because we need to load external resources
-        crossOriginEmbedderPolicy: false // Disabled for audio file handling
-    }));
-}
-
-// Serve static files based on environment
-if (!isProduction) {
-    app.use(express.static('./'));
-}
-app.use(express.json());
-
-// Create temp directory if it doesn't exist
-const tempDir = path.join(__dirname, 'temp');
-if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir);
-}
 
 // Helper to generate safe temporary filenames
 function generateTempFilename() {
     return crypto.randomBytes(16).toString('hex');
+}
+
+// Create temp directory if it doesn't exist
+const tempDir = path.join('/tmp', 'music-player');
+if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
 }
 
 // Clean up temp files older than 1 hour
@@ -70,141 +38,103 @@ function cleanupTempFiles() {
 // Run cleanup every hour
 setInterval(cleanupTempFiles, 60 * 60 * 1000);
 
-// Note: yt-dlp check removed as we're now using ytdl-core and ffmpeg for YouTube conversion
+// CORS headers
+const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+};
 
-// Music generation endpoint
-app.post('/api/generate-music', async (req, res) => {
-    const { prompt, length = 10000, apiKey } = req.body;
+exports.handler = async (event, context) => {
+    // Handle CORS preflight
+    if (event.httpMethod === 'OPTIONS') {
+        return {
+            statusCode: 200,
+            headers: corsHeaders,
+            body: ''
+        };
+    }
+
+    const { path: requestPath, httpMethod, body, queryStringParameters } = event;
     
-    if (!prompt) {
-        return res.status(400).json({ error: 'Prompt is required' });
-    }
-
-    if (!apiKey) {
-        return res.status(400).json({ error: 'ElevenLabs API key is required' });
-    }
-
-    const outputFile = path.join(tempDir, `${generateTempFilename()}.mp3`);
-
     try {
-        const { ElevenLabsClient } = require('@elevenlabs/elevenlabs-js');
+        // Parse the path to determine which endpoint to call
+        const pathParts = requestPath.split('/').filter(Boolean);
+        const endpoint = pathParts[pathParts.length - 1];
         
-        const elevenlabs = new ElevenLabsClient({
-            apiKey: apiKey,
-        });
-
-        console.log('Generating music with prompt:', prompt);
-        
-        // Generate music using ElevenLabs API
-        const track = await elevenlabs.music.compose({
-            prompt: prompt,
-            musicLengthMs: parseInt(length),
-        });
-
-        // Log the full response from ElevenLabs API
-        console.log('ElevenLabs API Response Type:', typeof track);
-
-        // Convert ReadableStream to Buffer if needed
-        let audioData;
-        if (track instanceof ReadableStream) {
-            console.log('Converting ReadableStream to audio data...');
-            const reader = track.getReader();
-            const chunks = [];
-            let done = false;
-            let totalBytes = 0;
-            
-            while (!done) {
-                const { value, done: readerDone } = await reader.read();
-                done = readerDone;
-                if (value) {
-                    chunks.push(value);
-                    totalBytes += value.length;
-                    console.log(`Read chunk: ${value.length} bytes (total: ${totalBytes} bytes)`);
+        switch (endpoint) {
+            case 'youtube-convert':
+                if (httpMethod === 'POST') {
+                    return await handleYouTubeConvert(JSON.parse(body || '{}'));
                 }
-            }
-            
-            console.log(`Total chunks received: ${chunks.length}`);
-            console.log(`Total audio data size: ${totalBytes} bytes`);
-            
-            // Combine chunks into a single Uint8Array
-            const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-            audioData = new Uint8Array(totalLength);
-            let offset = 0;
-            for (const chunk of chunks) {
-                audioData.set(chunk, offset);
-                offset += chunk.length;
-            }
-            
-            console.log(`Final audio data size: ${audioData.length} bytes`);
-            console.log(`First 20 bytes of audio data:`, Array.from(audioData.slice(0, 20)));
-        } else {
-            console.log('Track is not a ReadableStream, using as-is');
-            audioData = track;
-            console.log(`Audio data type: ${typeof audioData}`);
-            console.log(`Audio data length: ${audioData?.length || 'unknown'}`);
+                break;
+                
+            case 'youtube-metadata':
+                if (httpMethod === 'GET') {
+                    const videoId = pathParts[pathParts.length - 2];
+                    return await handleYouTubeMetadata(videoId);
+                }
+                break;
+                
+            case 'proxy-audio':
+                if (httpMethod === 'POST') {
+                    return await handleProxyAudio(JSON.parse(body || '{}'));
+                }
+                break;
+                
+            case 'generate-music':
+                if (httpMethod === 'POST') {
+                    return await handleGenerateMusic(JSON.parse(body || '{}'));
+                }
+                break;
+                
+            case 'generate-song-metadata':
+                if (httpMethod === 'POST') {
+                    return await handleGenerateSongMetadata(JSON.parse(body || '{}'));
+                }
+                break;
+                
+            case 'generate-cover-image':
+                if (httpMethod === 'POST') {
+                    return await handleGenerateCoverImage(JSON.parse(body || '{}'));
+                }
+                break;
+                
+            default:
+                return {
+                    statusCode: 404,
+                    headers: corsHeaders,
+                    body: JSON.stringify({ error: 'Endpoint not found' })
+                };
         }
-
-        // Write the audio data to a file
-        fs.writeFileSync(outputFile, audioData);
-
-        // Check if file exists and has size
-        if (!fs.existsSync(outputFile) || fs.statSync(outputFile).size === 0) {
-            throw new Error('Music generation produced no output file');
-        }
-
-        // Set proper headers
-        res.setHeader('Content-Type', 'audio/mpeg');
-        res.setHeader('Content-Disposition', 'attachment; filename="generated-music.mp3"');
-
-        // Send the file
-        res.sendFile(outputFile, (err) => {
-            if (err) {
-                console.error('Error sending file:', err);
-            }
-            // Clean up the temp file after sending
-            fs.unlink(outputFile, () => {});
-        });
-
-    } catch (error) {
-        console.error('Music generation error:', error);
         
-        // Parse ElevenLabs specific errors
-        let errorResponse = {
-            error: error.message || 'Music generation failed',
-            type: 'generic'
+        return {
+            statusCode: 405,
+            headers: corsHeaders,
+            body: JSON.stringify({ error: 'Method not allowed' })
         };
         
-        // Handle ElevenLabs API errors
-        if (error.statusCode) {
-            errorResponse.statusCode = error.statusCode;
-            
-            if (error.body && error.body.detail) {
-                const detail = error.body.detail;
-                errorResponse.type = detail.status || 'api_error';
-                errorResponse.message = detail.message || error.message;
-                
-                // Include prompt suggestion if available
-                if (detail.data && detail.data.prompt_suggestion) {
-                    errorResponse.promptSuggestion = detail.data.prompt_suggestion;
-                }
-            }
-        }
-        
-        // Set appropriate status code
-        const statusCode = error.statusCode || 500;
-        res.status(statusCode).json(errorResponse);
-        
-        // Clean up on error
-        if (fs.existsSync(outputFile)) {
-            fs.unlink(outputFile, () => {});
-        }
+    } catch (error) {
+        console.error('API Error:', error);
+        return {
+            statusCode: 500,
+            headers: corsHeaders,
+            body: JSON.stringify({ 
+                error: 'Internal server error',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            })
+        };
     }
-});
+};
 
-app.post('/api/youtube-convert', async (req, res) => {
-    const { url, videoId, metadata } = req.body;
+// YouTube conversion handler
+async function handleYouTubeConvert({ url, videoId, metadata }) {
     if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
+        return {
+            statusCode: 400,
+            headers: corsHeaders,
+            body: JSON.stringify({ error: 'URL is required' })
+        };
     }
 
     const outputFile = path.join(tempDir, `${generateTempFilename()}.mp3`);
@@ -279,24 +209,28 @@ app.post('/api/youtube-convert', async (req, res) => {
             // Continue without tags rather than failing
         }
 
-        // Set proper headers with metadata
+        // Read the file and return it
+        const fileBuffer = fs.readFileSync(outputFile);
         const safeTitle = extractedMetadata.title.replace(/[^\w\s-]/g, '').trim();
         const safeArtist = extractedMetadata.artist.replace(/[^\w\s-]/g, '').trim();
         const filename = `${safeArtist} - ${safeTitle}.mp3`.substring(0, 200);
 
-        res.setHeader('Content-Type', 'audio/mpeg');
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.setHeader('X-Video-Title', extractedMetadata.title);
-        res.setHeader('X-Video-Artist', extractedMetadata.artist);
+        // Clean up the temp file
+        fs.unlinkSync(outputFile);
 
-        // Send the file
-        res.sendFile(outputFile, (err) => {
-            if (err) {
-                console.error('Error sending file:', err);
-            }
-            // Clean up the temp file after sending
-            fs.unlink(outputFile, () => {});
-        });
+        return {
+            statusCode: 200,
+            headers: {
+                ...corsHeaders,
+                'Content-Type': 'audio/mpeg',
+                'Content-Disposition': `attachment; filename="${filename}"`,
+                'X-Video-Title': extractedMetadata.title,
+                'X-Video-Artist': extractedMetadata.artist,
+                'Content-Length': fileBuffer.length.toString()
+            },
+            body: fileBuffer.toString('base64'),
+            isBase64Encoded: true
+        };
 
     } catch (error) {
         console.error('YouTube conversion error:', error);
@@ -313,24 +247,30 @@ app.post('/api/youtube-convert', async (req, res) => {
             errorMessage = 'Video is not available in your region';
         }
 
-        res.status(500).json({ 
-            error: errorMessage,
-            details: isProduction ? undefined : error.message
-        });
-        
         // Clean up on error
         if (fs.existsSync(outputFile)) {
-            fs.unlink(outputFile, () => {});
+            fs.unlinkSync(outputFile);
         }
-    }
-});
 
-// Get YouTube video metadata
-app.get('/api/youtube-metadata/:videoId', async (req, res) => {
-    const { videoId } = req.params;
-    
+        return {
+            statusCode: 500,
+            headers: corsHeaders,
+            body: JSON.stringify({ 
+                error: errorMessage,
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            })
+        };
+    }
+}
+
+// YouTube metadata handler
+async function handleYouTubeMetadata(videoId) {
     if (!videoId || videoId === 'unknown') {
-        return res.status(400).json({ error: 'Valid video ID is required' });
+        return {
+            statusCode: 400,
+            headers: corsHeaders,
+            body: JSON.stringify({ error: 'Valid video ID is required' })
+        };
     }
 
     try {
@@ -356,7 +296,11 @@ app.get('/api/youtube-metadata/:videoId', async (req, res) => {
             viewCount: parseInt(videoDetails.viewCount) || 0
         };
 
-        res.json(metadata);
+        return {
+            statusCode: 200,
+            headers: corsHeaders,
+            body: JSON.stringify(metadata)
+        };
 
     } catch (error) {
         console.error('YouTube metadata error:', error);
@@ -370,19 +314,25 @@ app.get('/api/youtube-metadata/:videoId', async (req, res) => {
             errorMessage = 'Video is not available in your region';
         }
 
-        res.status(500).json({ 
-            error: errorMessage,
-            details: isProduction ? undefined : error.message
-        });
+        return {
+            statusCode: 500,
+            headers: corsHeaders,
+            body: JSON.stringify({ 
+                error: errorMessage,
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            })
+        };
     }
-});
+}
 
-// Proxy audio files (for direct audio URL handling)
-app.post('/api/proxy-audio', async (req, res) => {
-    const { url } = req.body;
-    
+// Proxy audio handler
+async function handleProxyAudio({ url }) {
     if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
+        return {
+            statusCode: 400,
+            headers: corsHeaders,
+            body: JSON.stringify({ error: 'URL is required' })
+        };
     }
 
     try {
@@ -393,7 +343,11 @@ app.post('/api/proxy-audio', async (req, res) => {
                           url.includes('sound');
 
         if (!isAudioUrl) {
-            return res.status(400).json({ error: 'URL does not appear to be an audio file' });
+            return {
+                statusCode: 400,
+                headers: corsHeaders,
+                body: JSON.stringify({ error: 'URL does not appear to be an audio file' })
+            };
         }
 
         // Fetch the audio file
@@ -412,30 +366,46 @@ app.post('/api/proxy-audio', async (req, res) => {
             throw new Error('URL does not return an audio file');
         }
 
-        // Set appropriate headers
-        res.setHeader('Content-Type', contentType);
-        res.setHeader('Content-Length', response.headers.get('content-length') || '');
-        
-        // Stream the audio data
-        response.body.pipe(res);
+        const audioBuffer = await response.arrayBuffer();
+
+        return {
+            statusCode: 200,
+            headers: {
+                ...corsHeaders,
+                'Content-Type': contentType,
+                'Content-Length': audioBuffer.byteLength.toString()
+            },
+            body: Buffer.from(audioBuffer).toString('base64'),
+            isBase64Encoded: true
+        };
 
     } catch (error) {
         console.error('Audio proxy error:', error);
-        res.status(500).json({ 
-            error: error.message || 'Failed to fetch audio file',
-            details: isProduction ? undefined : error.message
-        });
+        return {
+            statusCode: 500,
+            headers: corsHeaders,
+            body: JSON.stringify({ 
+                error: error.message || 'Failed to fetch audio file',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            })
+        };
     }
-});
+}
 
-// Generate song metadata using free LLM service
-app.post('/api/generate-song-metadata', async (req, res) => {
-    const { prompt } = req.body;
-    
-    if (!prompt) {
-        return res.status(400).json({ error: 'Prompt is required' });
-    }
+// Music generation handler (simplified for Netlify)
+async function handleGenerateMusic({ prompt, length = 10000, apiKey }) {
+    return {
+        statusCode: 501,
+        headers: corsHeaders,
+        body: JSON.stringify({ 
+            error: 'Music generation not available in serverless environment',
+            message: 'This feature requires a full server environment with persistent storage'
+        })
+    };
+}
 
+// Song metadata generation handler
+async function handleGenerateSongMetadata({ prompt }) {
     try {
         // Construct a system prompt that encourages JSON response
         const systemPrompt = `Based on this music description, generate a creative song title and artist name. Return ONLY a JSON object with "title" and "author" fields, nothing else. Make the title catchy and the artist name creative but believable. Music description: "${prompt}"`;
@@ -457,10 +427,14 @@ app.post('/api/generate-song-metadata', async (req, res) => {
         const data = await response.json();
         
         if (data.status === 'rate_limited') {
-            return res.status(429).json({ 
-                error: data.error || 'Rate limit exceeded',
-                retry_after: data.retry_after || 5
-            });
+            return {
+                statusCode: 429,
+                headers: corsHeaders,
+                body: JSON.stringify({ 
+                    error: data.error || 'Rate limit exceeded',
+                    retry_after: data.retry_after || 5
+                })
+            };
         }
 
         if (data.status !== 'success' && data.status !== 'succes') { // API has typo in success
@@ -501,25 +475,27 @@ app.post('/api/generate-song-metadata', async (req, res) => {
             console.log('Fallback regex extraction used for LLM response');
         }
 
-        res.json(metadata);
+        return {
+            statusCode: 200,
+            headers: corsHeaders,
+            body: JSON.stringify(metadata)
+        };
 
     } catch (error) {
         console.error('LLM metadata generation error:', error);
-        res.status(500).json({ 
-            error: 'Failed to generate song metadata',
-            fallback: { title: 'Generated Music', author: 'AI Artist' }
-        });
+        return {
+            statusCode: 500,
+            headers: corsHeaders,
+            body: JSON.stringify({ 
+                error: 'Failed to generate song metadata',
+                fallback: { title: 'Generated Music', author: 'AI Artist' }
+            })
+        };
     }
-});
+}
 
-// Generate cover image using text-to-image API
-app.post('/api/generate-cover-image', async (req, res) => {
-    const { prompt } = req.body;
-    
-    if (!prompt) {
-        return res.status(400).json({ error: 'Prompt is required' });
-    }
-
+// Cover image generation handler
+async function handleGenerateCoverImage({ prompt }) {
     try {
         // Create image prompt based on music description
         const imagePrompt = `Album cover art for: ${prompt}. Artistic, vibrant, music-themed design`;
@@ -552,48 +528,27 @@ app.post('/api/generate-cover-image', async (req, res) => {
 
         console.log(`Generated cover image size: ${imageBuffer.byteLength} bytes`);
 
-        // Set proper headers for JPEG image
-        res.setHeader('Content-Type', 'image/jpeg');
-        res.setHeader('Content-Length', imageBuffer.byteLength);
-        res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
-
-        // Send the image data
-        res.send(Buffer.from(imageBuffer));
+        return {
+            statusCode: 200,
+            headers: {
+                ...corsHeaders,
+                'Content-Type': 'image/jpeg',
+                'Content-Length': imageBuffer.byteLength.toString(),
+                'Cache-Control': 'public, max-age=3600' // Cache for 1 hour
+            },
+            body: Buffer.from(imageBuffer).toString('base64'),
+            isBase64Encoded: true
+        };
 
     } catch (error) {
         console.error('Cover image generation error:', error);
-        res.status(500).json({ 
-            error: 'Failed to generate cover image',
-            message: error.message || 'Image generation failed'
-        });
+        return {
+            statusCode: 500,
+            headers: corsHeaders,
+            body: JSON.stringify({ 
+                error: 'Failed to generate cover image',
+                message: error.message || 'Image generation failed'
+            })
+        };
     }
-});
-
-// Global error handler
-app.use((err, req, res, next) => {
-    console.error('Unhandled error:', err);
-    
-    // Don't expose error details in production
-    const errorMessage = isProduction 
-        ? 'An internal server error occurred'
-        : err.message || 'Unknown error';
-        
-    res.status(err.status || 500).json({
-        error: errorMessage,
-        status: err.status || 500
-    });
-});
-
-// Handle 404s
-app.use((req, res) => {
-    res.status(404).json({
-        error: 'Not Found',
-        status: 404
-    });
-});
-
-// Start server
-app.listen(port, () => {
-    console.log(`Server running in ${isProduction ? 'production' : 'development'} mode`);
-    console.log(`Listening on port ${port}`);
-}); 
+}
