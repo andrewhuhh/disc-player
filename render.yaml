@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: disc-player
+    env: node
+    buildCommand: |
+      # Install yt-dlp
+      curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+      chmod a+rx /usr/local/bin/yt-dlp
+      # Install node dependencies
+      npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+    healthCheckPath: /api/health
+    autoDeploy: true

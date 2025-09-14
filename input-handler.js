@@ -60,10 +60,18 @@ class InputHandler {
             } catch (error) {
                 console.error('Error processing URL:', error);
                 if (window.errorHandler) {
-                    window.errorHandler.showError('Failed to process the URL. Please make sure it\'s a valid audio file link.', {
-                        title: 'URL Processing Failed',
-                        duration: 6000
-                    });
+                    // Check for specific server configuration error
+                    if (error.message && error.message.includes('Server configuration error: yt-dlp is not installed')) {
+                        window.errorHandler.showError('YouTube download is temporarily unavailable. Please try again later or contact support.', {
+                            title: 'Service Unavailable',
+                            duration: 8000
+                        });
+                    } else {
+                        window.errorHandler.showError('Failed to process the URL. Please make sure it\'s a valid audio file link.', {
+                            title: 'URL Processing Failed',
+                            duration: 6000
+                        });
+                    }
                 } else {
                     alert('Failed to process the URL. Please make sure it\'s a valid audio file link.');
                 }
@@ -232,9 +240,28 @@ class InputHandler {
         } catch (error) {
             console.error('YouTube conversion error:', error);
             if (window.errorHandler) {
-                window.errorHandler.showError(error.message || 'Failed to convert YouTube video. Please try again later.', {
-                    title: 'YouTube Conversion Failed',
-                    duration: 6000
+                let errorTitle = 'YouTube Conversion Failed';
+                let errorMessage = error.message || 'Failed to convert YouTube video. Please try again later.';
+                let duration = 6000;
+
+                // Handle specific error types from server
+                if (error.type === 'server_config') {
+                    errorTitle = 'Service Unavailable';
+                    errorMessage = 'YouTube download is temporarily unavailable. Please try again later or contact support.';
+                    duration = 8000;
+                } else if (error.type === 'private_video') {
+                    errorMessage = 'This video is private and cannot be downloaded.';
+                } else if (error.type === 'video_unavailable') {
+                    errorMessage = 'This video is no longer available.';
+                } else if (error.type === 'copyright_restriction') {
+                    errorMessage = 'This video cannot be downloaded due to copyright restrictions.';
+                } else if (error.type === 'auth_required') {
+                    errorMessage = 'This video requires authentication and cannot be downloaded.';
+                }
+
+                window.errorHandler.showError(errorMessage, {
+                    title: errorTitle,
+                    duration: duration
                 });
             } else {
                 alert(error.message || 'Failed to convert YouTube video. Please try again later.');

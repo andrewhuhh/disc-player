@@ -130,14 +130,29 @@ app.get('/api/', (req, res) => {
 });
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
-        timestamp: new Date().toISOString(),
-        environment: isProduction ? 'production' : 'development',
-        node_version: process.version,
-        platform: process.platform
-    });
+app.get('/api/health', async (req, res) => {
+    try {
+        // Check if yt-dlp is installed and working
+        const isYtDlpInstalled = await checkYtDlp();
+        
+        res.json({ 
+            status: isYtDlpInstalled ? 'ok' : 'degraded',
+            timestamp: new Date().toISOString(),
+            environment: isProduction ? 'production' : 'development',
+            node_version: process.version,
+            platform: process.platform,
+            features: {
+                ytdlp: isYtDlpInstalled ? 'available' : 'unavailable'
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            status: 'error',
+            timestamp: new Date().toISOString(),
+            error: 'Health check failed',
+            details: isProduction ? undefined : error.message
+        });
+    }
 });
 
 // Security middleware for production
