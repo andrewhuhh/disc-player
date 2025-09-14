@@ -1,8 +1,6 @@
 /node_modules
 /dist
 /build
-/package-lock.json
-/package.json
 /webpack.config.js
 /webpack.config.js.map
 /webpack.config.js.map.gz
