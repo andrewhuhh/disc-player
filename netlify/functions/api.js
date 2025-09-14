@@ -174,7 +174,7 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
 
         // Get video metadata using ytdl-core
         console.log('Fetching video metadata...');
-        const info = await ytdl.getInfo(url).catch(err => {
+        const info = await ytdl.getInfo(url, YOUTUBE_REQUEST_OPTIONS).catch(err => {
             console.error('ytdl.getInfo error:', err);
             console.error('Error stack:', err.stack);
             throw err;
@@ -229,12 +229,7 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
         const audioStream = ytdl(url, { 
             quality: 'highestaudio',
             filter: 'audioonly',
-            requestOptions: {
-                headers: {
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-                    'accept-language': 'en-US,en;q=0.9'
-                }
-            }
+            ...YOUTUBE_REQUEST_OPTIONS
         });
 
         // Add stream error handling
@@ -331,6 +326,31 @@ async function handleYouTubeConvert({ url, videoId, metadata }) {
     }
 }
 
+// Common YouTube request options
+const YOUTUBE_REQUEST_OPTIONS = {
+    requestOptions: {
+        headers: {
+            // Mimic latest Chrome browser
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            'X-YouTube-Client-Name': '1',
+            'X-YouTube-Client-Version': '2.20230912.00.00'
+        },
+        // Add a random IPv4 X-Forwarded-For to help avoid rate limiting
+        transform: (parsed) => {
+            const ip = Array(4).fill(0).map(() => Math.floor(Math.random() * 256)).join('.');
+            parsed.set('x-forwarded-for', ip);
+            return parsed;
+        }
+    }
+};
+
 // YouTube metadata handler
 async function handleYouTubeMetadata(videoId) {
     console.log('Starting metadata fetch for video ID:', videoId);
@@ -358,7 +378,7 @@ async function handleYouTubeMetadata(videoId) {
 
         // Get video info with error handling
         console.log('Fetching video info...');
-        const info = await ytdl.getInfo(url).catch(err => {
+        const info = await ytdl.getInfo(url, YOUTUBE_REQUEST_OPTIONS).catch(err => {
             console.error('ytdl.getInfo error:', err);
             console.error('Error stack:', err.stack);
             throw err;
