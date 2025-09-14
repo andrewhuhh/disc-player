@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const cors = require('cors');
+const which = require('which');
 require('dotenv').config();
 
 // Rate limiting setup
@@ -25,26 +26,85 @@ const app = express();
 const port = process.env.PORT || 3000;
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Helper function to check if yt-dlp is installed
-function checkYtDlp() {
-    return new Promise((resolve) => {
-        const ytdlp = spawn('/usr/local/bin/yt-dlp', ['--version']);
-        
-        ytdlp.on('error', (err) => {
-            console.error('yt-dlp check error:', err.message);
-            resolve(false);
-        });
-        
-        ytdlp.on('close', (code) => {
-            if (code === 0) {
-                console.log('yt-dlp is available');
-                resolve(true);
+// Cache for resolved yt-dlp path
+let ytdlpPath = null;
+
+// Helper function to resolve yt-dlp path with fallback logic
+async function resolveYtDlpPath() {
+    // Return cached path if available
+    if (ytdlpPath) {
+        return ytdlpPath;
+    }
+
+    // Check environment variable first (highest priority)
+    if (process.env.YTDLP_PATH) {
+        console.log('Using yt-dlp path from environment variable:', process.env.YTDLP_PATH);
+        try {
+            if (fs.existsSync(process.env.YTDLP_PATH)) {
+                ytdlpPath = process.env.YTDLP_PATH;
+                return ytdlpPath;
             } else {
-                console.error('yt-dlp check failed with code:', code);
-                resolve(false);
+                console.warn('Environment variable YTDLP_PATH points to non-existent file:', process.env.YTDLP_PATH);
             }
+        } catch (error) {
+            console.warn('Error checking YTDLP_PATH environment variable:', error.message);
+        }
+    }
+
+    // Common installation paths to check
+    const commonPaths = ['/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp'];
+    
+    for (const commonPath of commonPaths) {
+        try {
+            if (fs.existsSync(commonPath)) {
+                console.log('Found yt-dlp at common path:', commonPath);
+                ytdlpPath = commonPath;
+                return ytdlpPath;
+            }
+        } catch (error) {
+            console.warn('Error checking common path', commonPath, ':', error.message);
+        }
+    }
+
+    // Fallback to PATH lookup using which
+    try {
+        const resolvedPath = await which('yt-dlp');
+        console.log('Found yt-dlp in PATH:', resolvedPath);
+        ytdlpPath = resolvedPath;
+        return ytdlpPath;
+    } catch (error) {
+        console.error('yt-dlp not found in PATH:', error.message);
+        throw new Error('yt-dlp not found. Checked environment variable YTDLP_PATH, common paths (/usr/local/bin/yt-dlp, /usr/bin/yt-dlp), and PATH. Please ensure yt-dlp is installed and accessible.');
+    }
+}
+
+// Helper function to check if yt-dlp is installed and working
+async function checkYtDlp() {
+    try {
+        const resolvedPath = await resolveYtDlpPath();
+        
+        return new Promise((resolve) => {
+            const ytdlp = spawn(resolvedPath, ['--version']);
+            
+            ytdlp.on('error', (err) => {
+                console.error('yt-dlp check error:', err.message);
+                resolve(false);
+            });
+            
+            ytdlp.on('close', (code) => {
+                if (code === 0) {
+                    console.log('yt-dlp is available at:', resolvedPath);
+                    resolve(true);
+                } else {
+                    console.error('yt-dlp check failed with code:', code);
+                    resolve(false);
+                }
+            });
         });
-    });
+    } catch (error) {
+        console.error('yt-dlp path resolution failed:', error.message);
+        return false;
+    }
 }
 
 // Configure CORS based on environment
@@ -354,16 +414,18 @@ app.post('/api/youtube-convert', youtubeDownloadLimiter, async (req, res) => {
         // Check if yt-dlp is installed
         const isYtDlpInstalled = await checkYtDlp();
         if (!isYtDlpInstalled) {
-            throw new Error('yt-dlp is not installed');
+            throw new Error('yt-dlp is not installed or not accessible');
         }
 
+        // Get resolved yt-dlp path
+        const resolvedYtdlpPath = await resolveYtDlpPath();
         console.log('Starting YouTube download for URL:', url);
         
         // Generate output filename
         outputFile = path.join(tempDir, `${generateTempFilename()}.mp3`);
 
         // Download and convert using yt-dlp
-        const ytdlp = spawn('/usr/local/bin/yt-dlp', [
+        const ytdlp = spawn(resolvedYtdlpPath, [
             '--extract-audio',
             '--audio-format', 'mp3',
             '--audio-quality', '0',  // Best quality
@@ -489,14 +551,16 @@ app.get('/api/youtube-metadata/:videoId', youtubeMetadataLimiter, async (req, re
         // Check if yt-dlp is installed
         const isYtDlpInstalled = await checkYtDlp();
         if (!isYtDlpInstalled) {
-            throw new Error('yt-dlp is not installed');
+            throw new Error('yt-dlp is not installed or not accessible');
         }
 
+        // Get resolved yt-dlp path
+        const resolvedYtdlpPath = await resolveYtDlpPath();
         const url = `https://www.youtube.com/watch?v=${videoId}`;
         console.log('Attempting to fetch video info for:', url);
 
         // Get video metadata using yt-dlp
-        const ytdlp = spawn('/usr/local/bin/yt-dlp', [
+        const ytdlp = spawn(resolvedYtdlpPath, [
             '--dump-json',
             '--no-playlist',
             url

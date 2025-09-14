@@ -19,7 +19,8 @@
     "helmet": "^7.1.0",
     "ioredis": "^5.7.0",
     "node-id3": "^0.2.9",
-    "rate-limit-redis": "^4.2.2"
+    "rate-limit-redis": "^4.2.2",
+    "which": "^4.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
