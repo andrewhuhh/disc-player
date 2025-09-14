@@ -1,28 +1,15 @@
-const { spawn } = require('child_process');
+// Load polyfills before anything else
+const { File, Blob, Headers, ReadableStream } = require('./polyfills');
+
+// Assign to global scope
+Object.assign(global, { File, Blob, Headers, ReadableStream });
+
+// Now load other dependencies
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const ytdl = require('@distube/ytdl-core');
 const fetch = require('node-fetch');
-
-// Polyfill File class for Node environment
-if (typeof File === 'undefined') {
-    global.File = class File {
-        constructor(bits, name, options = {}) {
-            this.bits = bits;
-            this.name = name;
-            this.options = options;
-            this.type = options.type || '';
-            this.size = bits.reduce((acc, bit) => acc + (bit.length || bit.size || 0), 0);
-            this.lastModified = options.lastModified || Date.now();
-        }
-    };
-}
-
-// Polyfill Blob if needed
-if (typeof Blob === 'undefined') {
-    global.Blob = require('buffer').Blob;
-}
 
 // Helper to generate safe temporary filenames
 function generateTempFilename() {
