@@ -37,22 +37,22 @@ app.use(express.json());
 app.use(limiter);
 
 // Root route for basic info
-app.get('/', (req, res) => {
+app.get('/api/', (req, res) => {
     res.json({ 
         status: 'ok',
         service: 'Record Player API',
         version: '1.0.0',
-        endpoints: ['/youtube-metadata/:videoId', '/youtube-convert', '/health']
+        endpoints: ['/api/youtube-metadata/:videoId', '/api/youtube-convert', '/api/health']
     });
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // YouTube metadata endpoint
-app.get('/youtube-metadata/:videoId', async (req, res) => {
+app.get('/api/youtube-metadata/:videoId', async (req, res) => {
     const { videoId } = req.params;
     
     if (!videoId) {
@@ -101,7 +101,7 @@ app.get('/youtube-metadata/:videoId', async (req, res) => {
 });
 
 // YouTube conversion endpoint
-app.post('/youtube-convert', async (req, res) => {
+app.post('/api/youtube-convert', async (req, res) => {
     const { url } = req.body;
     
     if (!url) {
