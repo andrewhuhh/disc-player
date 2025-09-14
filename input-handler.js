@@ -89,7 +89,7 @@ class InputHandler {
             }
 
             // Make request to our backend conversion service
-            const response = await fetch(`${apiBaseUrl}/api/youtube-convert`, {
+            const response = await fetch(`${apiBaseUrl}/youtube-convert`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -153,19 +153,19 @@ class InputHandler {
     }
 
     getApiBaseUrl() {
-        // Determine API base URL based on environment
+        // Use Render.com server in production, local in development
         if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
             return 'http://localhost:3000';
         } else {
-            // For Netlify deployment, use the same origin
-            return window.location.origin;
+            // Production server on Render.com
+            return 'https://disc-player.onrender.com';
         }
     }
 
     async fetchYouTubeMetadata(videoId, apiBaseUrl) {
         try {
             console.log('Fetching metadata for video ID:', videoId);
-            const response = await fetch(`${apiBaseUrl}/api/youtube-metadata/${videoId}`);
+            const response = await fetch(`${apiBaseUrl}/youtube-metadata/${videoId}`);
             
             if (!response.ok) {
                 console.error('Metadata fetch failed with status:', response.status);
@@ -202,7 +202,7 @@ class InputHandler {
             const apiBaseUrl = this.getApiBaseUrl();
             
             // Instead of fetching directly, go through your backend proxy
-            const response = await fetch(`${apiBaseUrl}/api/proxy-audio`, {
+            const response = await fetch(`${apiBaseUrl}/proxy-audio`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
