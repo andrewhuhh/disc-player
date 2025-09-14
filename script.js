@@ -128,7 +128,7 @@ class ErrorHandler {
                     actions: [
                         {
                             text: 'Get API Key',
-                            action: () => window.open('https://elevenlabs.io/speech-synthesis', '_blank')
+                            action: () => window.open('https://elevenlabs.io/app/developers/api-keys', '_blank')
                         }
                     ]
                 };
