@@ -28,35 +28,22 @@ const isProduction = process.env.NODE_ENV === 'production';
 // Helper function to check if yt-dlp is installed
 function checkYtDlp() {
     return new Promise((resolve) => {
-        // Try both global pip installation and local paths
-        const paths = ['yt-dlp', '/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp'];
-        let tried = 0;
+        const ytdlp = spawn('/usr/local/bin/yt-dlp', ['--version']);
         
-        function tryPath(index) {
-            if (index >= paths.length) {
-                console.error('yt-dlp not found in any standard location');
+        ytdlp.on('error', (err) => {
+            console.error('yt-dlp check error:', err.message);
+            resolve(false);
+        });
+        
+        ytdlp.on('close', (code) => {
+            if (code === 0) {
+                console.log('yt-dlp is available');
+                resolve(true);
+            } else {
+                console.error('yt-dlp check failed with code:', code);
                 resolve(false);
-                return;
             }
-            
-            const ytdlp = spawn(paths[index], ['--version']);
-            
-            ytdlp.on('error', (err) => {
-                console.error(`yt-dlp check error for ${paths[index]}:`, err.message);
-                tryPath(index + 1);
-            });
-            
-            ytdlp.on('close', (code) => {
-                if (code === 0) {
-                    console.log(`yt-dlp found at ${paths[index]}`);
-                    resolve(true);
-                } else {
-                    tryPath(index + 1);
-                }
-            });
-        }
-        
-        tryPath(0);
+        });
     });
 }
 
@@ -376,7 +363,7 @@ app.post('/api/youtube-convert', youtubeDownloadLimiter, async (req, res) => {
         outputFile = path.join(tempDir, `${generateTempFilename()}.mp3`);
 
         // Download and convert using yt-dlp
-        const ytdlp = spawn('yt-dlp', [
+        const ytdlp = spawn('/usr/local/bin/yt-dlp', [
             '--extract-audio',
             '--audio-format', 'mp3',
             '--audio-quality', '0',  // Best quality
@@ -509,7 +496,7 @@ app.get('/api/youtube-metadata/:videoId', youtubeMetadataLimiter, async (req, re
         console.log('Attempting to fetch video info for:', url);
 
         // Get video metadata using yt-dlp
-        const ytdlp = spawn('yt-dlp', [
+        const ytdlp = spawn('/usr/local/bin/yt-dlp', [
             '--dump-json',
             '--no-playlist',
             url

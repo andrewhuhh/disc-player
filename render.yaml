@@ -1,13 +1,7 @@
 services:
   - type: web
     name: disc-player
-    env: node
-    buildCommand: |
-      pip3 install --no-cache-dir yt-dlp
-      npm install
-    startCommand: npm start
-    envVars:
-      - key: NODE_ENV
-        value: production
+    env: docker
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     autoDeploy: true
