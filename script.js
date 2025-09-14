@@ -1053,13 +1053,15 @@ async function processAudioFile(file, initialMetadata = null) {
         // If no embedded cover, try to fetch thumbnail provided by caller
         if (!mergedMetadata.coverBlob && initialMetadata?.thumbnail) {
             try {
-                const resp = await fetch(initialMetadata.thumbnail);
+                const apiBaseUrl = window.inputHandler?.getApiBaseUrl() || 'http://localhost:3000';
+                const resp = await fetch(`${apiBaseUrl}/api/proxy-thumbnail?url=${encodeURIComponent(initialMetadata.thumbnail)}`);
                 if (resp.ok) {
                     const blob = await resp.blob();
                     mergedMetadata.coverBlob = blob;
                     mergedMetadata.coverUrl = URL.createObjectURL(blob);
                 }
             } catch (e) {
+                console.warn('Failed to fetch thumbnail:', e);
                 // ignore thumbnail fetch errors; continue without cover
             }
         }

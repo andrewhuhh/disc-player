@@ -769,6 +769,9 @@ h1, h2, h3, h4, h5, h6 {
     text-align: right;
     line-height: 1.2;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: end;
 }
 
 .song-title {
@@ -1792,6 +1795,23 @@ h1, h2, h3, h4, h5, h6 {
 
 .delete-confirm-btn:active {
     transform: scale(0.98);
+}
+
+.song-item.loading {
+    opacity: 0.7;
+    pointer-events: none;
+}
+.song-item.loading .song-cover-inner {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+.song-item.loading .song-title,
+.song-item.loading .song-artist {
+    color: #666;
+}
+@keyframes pulse {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
 }
 
 /* Mobile positioning for songs button and panel */

@@ -4,8 +4,12 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const cors = require('cors');
-const ytdl = require('@distube/ytdl-core');
 require('dotenv').config();
+
+// Rate limiting setup
+const rateLimit = require('express-rate-limit');
+const RedisStore = require('rate-limit-redis');
+const Redis = require('ioredis');
 
 // Optional dependencies for local development
 let ffmpeg, ffmpegPath, NodeID3;
@@ -21,6 +25,21 @@ const app = express();
 const port = process.env.PORT || 3000;
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Helper function to check if yt-dlp is installed
+function checkYtDlp() {
+    return new Promise((resolve) => {
+        const ytdlp = spawn('yt-dlp', ['--version']);
+        
+        ytdlp.on('error', () => {
+            resolve(false);
+        });
+        
+        ytdlp.on('close', (code) => {
+            resolve(code === 0);
+        });
+    });
+}
+
 // Configure CORS based on environment
 const corsOptions = {
     origin: isProduction 
@@ -30,6 +49,67 @@ const corsOptions = {
     credentials: true
 };
 app.use(cors(corsOptions));
+
+// Configure Redis for rate limiting
+let redisClient;
+if (process.env.REDIS_URL) {
+    redisClient = new Redis(process.env.REDIS_URL);
+    redisClient.on('error', (err) => console.warn('Redis error:', err));
+}
+
+// Configure rate limiters
+const createLimiter = (windowMs, max, keyPrefix) => {
+    const config = {
+        windowMs,
+        max,
+        standardHeaders: true,
+        legacyHeaders: false,
+        keyGenerator: (req, res, next) => {
+            // Use express-rate-limit's built-in IP key generator
+            const ip = rateLimit.ipKeyGenerator(req, res, next);
+            // Add optional API key to the key
+            const apiKey = req.headers['x-api-key'] || '';
+            return `${keyPrefix}:${ip}:${apiKey}`;
+        },
+        handler: (req, res) => {
+            res.status(429).json({
+                error: 'Too many requests',
+                retryAfter: Math.ceil(windowMs / 1000),
+                type: 'rate_limit_exceeded'
+            });
+        }
+    };
+
+    // Use Redis store if available
+    if (redisClient) {
+        config.store = new RedisStore({
+            sendCommand: (...args) => redisClient.call(...args),
+            prefix: `${keyPrefix}:rl:`
+        });
+    }
+
+    return rateLimit(config);
+};
+
+// Global rate limit
+app.use(createLimiter(
+    60 * 1000, // 1 minute window
+    60,        // 60 requests per window
+    'global'
+));
+
+// YouTube-specific rate limits
+const youtubeMetadataLimiter = createLimiter(
+    60 * 1000,  // 1 minute window
+    30,         // 30 requests per window
+    'yt_meta'
+);
+
+const youtubeDownloadLimiter = createLimiter(
+    5 * 60 * 1000,  // 5 minute window
+    15,             // 15 requests per window
+    'yt_dl'
+);
 
 // Root API info endpoint
 app.get('/api/', (req, res) => {
@@ -75,11 +155,14 @@ if (!isProduction) {
 }
 app.use(express.json());
 
-// Create temp directory if it doesn't exist
+// Create and configure temp directory
 const tempDir = path.join(__dirname, 'temp');
 if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir);
+    fs.mkdirSync(tempDir, { recursive: true });
 }
+
+// Clean up temp files older than 1 hour
+cleanupTempFiles();
 
 // Helper to generate safe temporary filenames
 function generateTempFilename() {
@@ -237,8 +320,8 @@ app.post('/api/generate-music', async (req, res) => {
     }
 });
 
-app.post('/api/youtube-convert', async (req, res) => {
-    const { url, videoId, metadata } = req.body;
+app.post('/api/youtube-convert', youtubeDownloadLimiter, async (req, res) => {
+    const { url } = req.body;
     if (!url) {
         return res.status(400).json({ error: 'URL is required' });
     }
@@ -246,122 +329,76 @@ app.post('/api/youtube-convert', async (req, res) => {
     let outputFile;
 
     try {
-        // Validate YouTube URL
-        if (!ytdl.validateURL(url)) {
-            throw new Error('Invalid YouTube URL');
+        // Check if yt-dlp is installed
+        const isYtDlpInstalled = await checkYtDlp();
+        if (!isYtDlpInstalled) {
+            throw new Error('yt-dlp is not installed');
         }
 
-        // Get video metadata using ytdl-core
-        console.log('Fetching video metadata...');
-        const info = await ytdl.getInfo(url, {
-            requestOptions: {
-                headers: {
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-                    'accept-language': 'en-US,en;q=0.9'
-                }
-            }
-        });
-        const videoDetails = info.videoDetails;
+        console.log('Starting YouTube download for URL:', url);
         
-        // Extract metadata
-        const extractedMetadata = {
-            title: videoDetails.title || 'Unknown Title',
-            artist: videoDetails.author?.name || 'Unknown Artist',
-            album: videoDetails.media?.category || 'YouTube',
-            year: videoDetails.uploadDate ? videoDetails.uploadDate.split('-')[0] : new Date().getFullYear().toString(),
-            duration: parseInt(videoDetails.lengthSeconds) || 0
-        };
+        // Generate output filename
+        outputFile = path.join(tempDir, `${generateTempFilename()}.mp3`);
 
-        console.log('Extracted metadata:', extractedMetadata);
+        // Download and convert using yt-dlp
+        const ytdlp = spawn('yt-dlp', [
+            '--extract-audio',
+            '--audio-format', 'mp3',
+            '--audio-quality', '0',  // Best quality
+            '--embed-metadata',      // Include video metadata
+            '--no-playlist',         // Single video only
+            '--output', outputFile,
+            url
+        ]);
 
-        // Choose best audio-only format to set accurate headers/extension
-        const selectedFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' });
-        const container = selectedFormat?.container || '';
-        const codecs = selectedFormat?.codecs || '';
-        const isWebm = container === 'webm' || /opus/i.test(codecs);
-        const contentType = isWebm ? 'audio/webm' : 'audio/mp4';
-        const fileExtension = isWebm ? 'webm' : 'm4a';
-
-        // Determine output file path based on availability of ffmpeg
-        outputFile = path.join(tempDir, `${generateTempFilename()}.${(ffmpeg && ffmpegPath) ? 'mp3' : fileExtension}`);
-
-        // Get the best audio stream
-        const audioStream = ytdl(url, { 
-            quality: 'highestaudio',
-            filter: 'audioonly',
-            requestOptions: {
-                headers: {
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-                    'accept-language': 'en-US,en;q=0.9'
-                }
-            }
+        let errorOutput = '';
+        ytdlp.stderr.on('data', (data) => {
+            errorOutput += data;
+            console.log('yt-dlp progress:', data.toString());
         });
 
-        // Convert to MP3 with ffmpeg and add ID3 tags
-        if (ffmpeg && ffmpegPath) {
-            await new Promise((resolve, reject) => {
-                ffmpeg(audioStream)
-                    .setFfmpegPath(ffmpegPath)
-                    .audioBitrate(128)
-                    .audioChannels(2)
-                    .audioFrequency(44100)
-                    .toFormat('mp3')
-                    .on('error', (err) => {
-                        console.error('FFmpeg error:', err);
-                        reject(err);
-                    })
-                    .on('end', () => {
-                        console.log('Audio conversion completed');
-                        resolve();
-                    })
-                    .save(outputFile);
-            });
-        } else {
-            // Fallback: stream audio directly without conversion
-            const chunks = [];
-            for await (const chunk of audioStream) {
-                chunks.push(chunk);
-            }
-            const audioBuffer = Buffer.concat(chunks);
-            fs.writeFileSync(outputFile, audioBuffer);
+        const exitCode = await new Promise((resolve) => {
+            ytdlp.on('close', resolve);
+        });
+
+        if (exitCode !== 0) {
+            throw new Error(errorOutput || 'Failed to download and convert video');
         }
 
         // Check if file exists and has size
         if (!fs.existsSync(outputFile) || fs.statSync(outputFile).size === 0) {
-            throw new Error('Conversion produced no output file');
+            throw new Error('Download produced no output file');
         }
 
-        // Add ID3 tags to the MP3 file
-        if (NodeID3 && outputFile.endsWith('.mp3')) {
-            try {
-                const id3Tags = {
-                    title: extractedMetadata.title,
-                    artist: extractedMetadata.artist,
-                    album: extractedMetadata.album,
-                    year: extractedMetadata.year,
-                    genre: 'YouTube'
-                };
+        // Get metadata from the downloaded file
+        const metadata = await new Promise((resolve, reject) => {
+            ffmpeg.ffprobe(outputFile, (err, data) => {
+                if (err) {
+                    console.warn('Failed to read metadata:', err);
+                    resolve({
+                        title: 'Unknown Title',
+                        artist: 'Unknown Artist'
+                    });
+                    return;
+                }
 
-                console.log('Adding ID3 tags:', id3Tags);
-                NodeID3.update(id3Tags, outputFile);
-                console.log('ID3 tags added successfully');
-            } catch (tagError) {
-                console.warn('Failed to add ID3 tags:', tagError);
-                // Continue without tags rather than failing
-            }
-        } else {
-            console.log('ID3 tagging not available - skipping metadata tags');
-        }
+                const tags = data.format.tags || {};
+                resolve({
+                    title: tags.title || 'Unknown Title',
+                    artist: tags.artist || tags.ARTIST || 'Unknown Artist'
+                });
+            });
+        });
 
         // Set proper headers with metadata
-        const safeTitle = extractedMetadata.title.replace(/[^\w\s-]/g, '').trim();
-        const safeArtist = extractedMetadata.artist.replace(/[^\w\s-]/g, '').trim();
-        const filename = `${safeArtist} - ${safeTitle}.${outputFile.endsWith('.mp3') ? 'mp3' : fileExtension}`.substring(0, 200);
+        const safeTitle = metadata.title.replace(/[^\w\s-]/g, '').trim();
+        const safeArtist = metadata.artist.replace(/[^\w\s-]/g, '').trim();
+        const filename = `${safeArtist} - ${safeTitle}.mp3`.substring(0, 200);
 
-        res.setHeader('Content-Type', outputFile.endsWith('.mp3') ? 'audio/mpeg' : contentType);
+        res.setHeader('Content-Type', 'audio/mpeg');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.setHeader('X-Video-Title', extractedMetadata.title);
-        res.setHeader('X-Video-Artist', extractedMetadata.artist);
+        res.setHeader('X-Video-Title', metadata.title);
+        res.setHeader('X-Video-Artist', metadata.artist);
 
         // Send the file
         res.sendFile(outputFile, (err) => {
@@ -373,24 +410,43 @@ app.post('/api/youtube-convert', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('YouTube conversion error:', error);
+        console.error('YouTube download error:', error);
         
-        // Provide more specific error messages
-        let errorMessage = 'Conversion failed';
-        if (error.message.includes('Invalid YouTube URL')) {
-            errorMessage = 'Invalid YouTube URL provided';
+        let errorResponse = {
+            error: 'Download failed',
+            type: 'download_error'
+        };
+
+        let statusCode = 500;
+
+        if (error.message.includes('yt-dlp is not installed')) {
+            errorResponse.error = 'Server configuration error: yt-dlp is not installed';
+            errorResponse.type = 'server_config';
+            statusCode = 503;
+        } else if (error.message.includes('Private video')) {
+            errorResponse.error = 'Video is private';
+            errorResponse.type = 'private_video';
+            statusCode = 403;
         } else if (error.message.includes('Video unavailable')) {
-            errorMessage = 'Video is unavailable or private';
-        } else if (error.message.includes('age-restricted')) {
-            errorMessage = 'Video is age-restricted and cannot be downloaded';
-        } else if (error.message.includes('region')) {
-            errorMessage = 'Video is not available in your region';
+            errorResponse.error = 'Video is unavailable';
+            errorResponse.type = 'video_unavailable';
+            statusCode = 404;
+        } else if (error.message.includes('copyright')) {
+            errorResponse.error = 'Video is not available due to copyright restrictions';
+            errorResponse.type = 'copyright_restriction';
+            statusCode = 451;
+        } else if (error.message.includes('Sign in')) {
+            errorResponse.error = 'Video requires authentication';
+            errorResponse.type = 'auth_required';
+            statusCode = 401;
         }
 
-        res.status(500).json({ 
-            error: errorMessage,
-            details: isProduction ? undefined : error.message
-        });
+        // Add debug details in development
+        if (!isProduction) {
+            errorResponse.details = error.message;
+        }
+
+        res.status(statusCode).json(errorResponse);
         
         // Clean up on error
         if (fs.existsSync(outputFile)) {
@@ -400,7 +456,7 @@ app.post('/api/youtube-convert', async (req, res) => {
 });
 
 // Get YouTube video metadata
-app.get('/api/youtube-metadata/:videoId', async (req, res) => {
+app.get('/api/youtube-metadata/:videoId', youtubeMetadataLimiter, async (req, res) => {
     const { videoId } = req.params;
     
     if (!videoId || videoId === 'unknown') {
@@ -408,33 +464,52 @@ app.get('/api/youtube-metadata/:videoId', async (req, res) => {
     }
 
     try {
-        const url = `https://www.youtube.com/watch?v=${videoId}`;
-        
-        // Validate URL
-        if (!ytdl.validateURL(url)) {
-            throw new Error('Invalid YouTube URL');
+        // Check if yt-dlp is installed
+        const isYtDlpInstalled = await checkYtDlp();
+        if (!isYtDlpInstalled) {
+            throw new Error('yt-dlp is not installed');
         }
 
-        // Get video info with request headers
-        const info = await ytdl.getInfo(url, {
-            requestOptions: {
-                headers: {
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-                    'accept-language': 'en-US,en;q=0.9'
-                }
-            }
+        const url = `https://www.youtube.com/watch?v=${videoId}`;
+        console.log('Attempting to fetch video info for:', url);
+
+        // Get video metadata using yt-dlp
+        const ytdlp = spawn('yt-dlp', [
+            '--dump-json',
+            '--no-playlist',
+            url
+        ]);
+
+        let jsonData = '';
+        let errorOutput = '';
+
+        ytdlp.stdout.on('data', (data) => {
+            jsonData += data;
         });
-        const videoDetails = info.videoDetails;
+
+        ytdlp.stderr.on('data', (data) => {
+            errorOutput += data;
+        });
+
+        const exitCode = await new Promise((resolve) => {
+            ytdlp.on('close', resolve);
+        });
+
+        if (exitCode !== 0) {
+            throw new Error(errorOutput || 'Failed to fetch video metadata');
+        }
+
+        const videoDetails = JSON.parse(jsonData);
         
         // Extract metadata
         const metadata = {
             title: videoDetails.title || 'Unknown Title',
-            author: videoDetails.author?.name || 'Unknown Artist',
-            duration: parseInt(videoDetails.lengthSeconds) || 0,
-            thumbnail: videoDetails.thumbnails?.[0]?.url || null,
+            author: videoDetails.uploader || videoDetails.channel || 'Unknown Artist',
+            duration: parseInt(videoDetails.duration) || 0,
+            thumbnail: videoDetails.thumbnail || null,
             description: videoDetails.description || '',
-            uploadDate: videoDetails.uploadDate || null,
-            viewCount: parseInt(videoDetails.viewCount) || 0
+            uploadDate: videoDetails.upload_date || null,
+            viewCount: parseInt(videoDetails.view_count) || 0
         };
 
         res.json(metadata);
@@ -443,16 +518,96 @@ app.get('/api/youtube-metadata/:videoId', async (req, res) => {
         console.error('YouTube metadata error:', error);
         
         let errorMessage = 'Failed to fetch video metadata';
-        if (error.message.includes('Video unavailable')) {
-            errorMessage = 'Video is unavailable or private';
-        } else if (error.message.includes('age-restricted')) {
-            errorMessage = 'Video is age-restricted';
-        } else if (error.message.includes('region')) {
-            errorMessage = 'Video is not available in your region';
+        let statusCode = 500;
+
+        if (error.message.includes('yt-dlp is not installed')) {
+            errorMessage = 'Server configuration error: yt-dlp is not installed';
+            statusCode = 503;
+        } else if (error.message.includes('Private video')) {
+            errorMessage = 'Video is private';
+            statusCode = 403;
+        } else if (error.message.includes('Video unavailable')) {
+            errorMessage = 'Video is unavailable';
+            statusCode = 404;
+        } else if (error.message.includes('copyright')) {
+            errorMessage = 'Video is not available due to copyright restrictions';
+            statusCode = 451;
         }
 
-        res.status(500).json({ 
+        res.status(statusCode).json({ 
             error: errorMessage,
+            details: isProduction ? undefined : error.message
+        });
+    }
+});
+
+// Proxy YouTube thumbnails
+app.get('/api/proxy-thumbnail', async (req, res) => {
+    const { url } = req.query;
+    
+    if (!url) {
+        return res.status(400).json({ error: 'URL is required' });
+    }
+
+    try {
+        // Validate that it's a YouTube thumbnail URL
+        if (!url.includes('ytimg.com')) {
+            return res.status(400).json({ error: 'Not a valid YouTube thumbnail URL' });
+        }
+
+        console.log('Fetching thumbnail:', url);
+
+        // Try different thumbnail formats
+        const formats = [
+            url,
+            url.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg'), // Try jpg version
+            url.replace('maxresdefault', 'hqdefault') // Try lower resolution
+        ];
+
+        let response;
+        let error;
+
+        for (const format of formats) {
+            try {
+                console.log('Trying format:', format);
+                response = await fetch(format, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    }
+                });
+
+                if (response.ok) {
+                    console.log('Successfully fetched format:', format);
+                    break;
+                }
+                
+                console.log('Format failed with status:', response.status);
+                error = new Error(`Failed to fetch thumbnail: ${response.status} ${response.statusText}`);
+            } catch (e) {
+                console.log('Format fetch error:', e.message);
+                error = e;
+            }
+        }
+
+        if (!response?.ok) {
+            throw error || new Error('Failed to fetch thumbnail in any format');
+        }
+
+        // Get the image data as a buffer
+        const imageBuffer = await response.arrayBuffer();
+        
+        // Set appropriate headers
+        res.setHeader('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+        res.setHeader('Content-Length', Buffer.byteLength(imageBuffer));
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+        
+        // Send the buffer
+        res.send(Buffer.from(imageBuffer));
+
+    } catch (error) {
+        console.error('Thumbnail proxy error:', error);
+        res.status(500).json({ 
+            error: error.message || 'Failed to fetch thumbnail',
             details: isProduction ? undefined : error.message
         });
     }

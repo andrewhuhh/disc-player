@@ -8,23 +8,6 @@
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Space+Mono&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        .loading-indicator {
-            display: none;
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            z-index: 1000;
-        }
-        .loading-indicator.active {
-            display: block;
-        }
-    </style>
 </head>
 <body>
     <div class="container">
@@ -78,8 +61,6 @@
             </div>
         </div>
     </div>
-    <div class="loading-indicator">Converting YouTube video...</div>
-    
     <!-- AI Generation Overlay -->
     <div class="ai-generation-overlay" id="ai-generation-overlay">
         <div class="ai-generation-content">

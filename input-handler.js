@@ -5,6 +5,23 @@ class InputHandler {
         this.addSongInput = document.querySelector('.add-song-input');
         // Don't set up event listeners automatically - they're handled by the main script now
         // this.setupEventListeners();
+
+        // Colors for gradient generation
+        this.gradientColors = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEEAD',
+            '#D4A5A5', '#9B786F', '#A8E6CF', '#DCEDC1', '#FFD3B6'
+        ];
+    }
+
+    generateRandomGradient() {
+        const getRandomColor = () => this.gradientColors[Math.floor(Math.random() * this.gradientColors.length)];
+        const getRandomAngle = () => Math.floor(Math.random() * 360);
+        
+        const color1 = getRandomColor();
+        const color2 = getRandomColor();
+        const angle = getRandomAngle();
+        
+        return `linear-gradient(${angle}deg, ${color1}, ${color2})`;
     }
 
     setupEventListeners() {
@@ -61,22 +78,100 @@ class InputHandler {
         return url.includes('youtube.com') || url.includes('youtu.be');
     }
 
-    async handleYouTubeUrl(url) {
-        try {
-            const loadingIndicator = document.querySelector('.loading-indicator');
-            if (loadingIndicator) {
-                loadingIndicator.classList.add('active');
-            }
+    createLoadingSongItem(metadata = null) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'song-item loading';
+        wrapper.dataset.type = 'song';
+        wrapper.tabIndex = -1; // Not focusable while loading
 
-            // Extract video ID and get metadata
+        const cover = document.createElement('div');
+        cover.className = 'song-cover';
+        
+        const coverInner = document.createElement('div');
+        coverInner.className = 'song-cover-inner';
+        coverInner.style.backgroundImage = this.generateRandomGradient();
+        
+        const coverDot = document.createElement('div');
+        coverDot.className = 'song-cover-dot';
+        
+        coverInner.appendChild(coverDot);
+        cover.appendChild(coverInner);
+
+        const meta = document.createElement('div');
+        meta.className = 'song-meta';
+        const title = document.createElement('div');
+        title.className = 'song-title';
+        title.textContent = metadata?.title || 'Converting...';
+        const artist = document.createElement('div');
+        artist.className = 'song-artist';
+        artist.textContent = metadata?.author || 'Please wait';
+        meta.appendChild(title);
+        meta.appendChild(artist);
+
+        wrapper.appendChild(cover);
+        wrapper.appendChild(meta);
+
+        return wrapper;
+    }
+
+    updateLoadingSongItem(loadingSongItem, metadata) {
+        if (!loadingSongItem) return;
+        
+        const title = loadingSongItem.querySelector('.song-title');
+        const artist = loadingSongItem.querySelector('.song-artist');
+        
+        if (title && metadata?.title) {
+            title.textContent = metadata.title;
+        }
+        if (artist && metadata?.author) {
+            artist.textContent = metadata.author;
+        }
+    }
+
+    closeAddMusicPanel() {
+        const addMusicPanel = document.querySelector('.add-music-panel');
+        if (addMusicPanel && addMusicPanel.classList.contains('expanded')) {
+            addMusicPanel.classList.remove('expanded');
+        }
+    }
+
+    async handleYouTubeUrl(url) {
+        let loadingSongItem = null;
+        try {
+            // Close the add music panel
+            this.closeAddMusicPanel();
+            
+            // Extract video ID
             const videoId = this.extractYouTubeVideoId(url);
             console.log('Extracted video ID:', videoId);
+
+            // Create and add loading song item immediately
+            loadingSongItem = this.createLoadingSongItem();
+            const songsList = document.querySelector('.songs-list');
+            const songsPanel = document.querySelector('.songs-panel');
+            
+            // Ensure songs panel is open
+            if (songsPanel && !songsPanel.classList.contains('open')) {
+                songsPanel.classList.add('open');
+                songsPanel.setAttribute('aria-hidden', 'false');
+            }
+            
+            if (songsList) {
+                songsList.appendChild(loadingSongItem); // Add to bottom of list
+                setTimeout(() => loadingSongItem.classList.add('animate'), 10);
+                // Scroll into view
+                loadingSongItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
 
             // Get the API base URL based on environment
             const apiBaseUrl = this.getApiBaseUrl();
             
+            // Fetch metadata and update loading item
             const metadata = await this.fetchYouTubeMetadata(videoId, apiBaseUrl);
             console.log('Fetched metadata:', metadata);
+            if (metadata) {
+                this.updateLoadingSongItem(loadingSongItem, metadata);
+            }
 
             let filename;
             if (metadata && metadata.title && metadata.author) {
@@ -145,9 +240,9 @@ class InputHandler {
                 alert(error.message || 'Failed to convert YouTube video. Please try again later.');
             }
         } finally {
-            const loadingIndicator = document.querySelector('.loading-indicator');
-            if (loadingIndicator) {
-                loadingIndicator.classList.remove('active');
+            // Remove loading song item if it exists
+            if (loadingSongItem && loadingSongItem.parentNode) {
+                loadingSongItem.parentNode.removeChild(loadingSongItem);
             }
         }
     }

@@ -23,6 +23,13 @@ cd disc-player
 ```
 
 2. **Install dependencies**:
+
+First, install yt-dlp:
+- **Windows**: `winget install yt-dlp` or download from [yt-dlp releases](https://github.com/yt-dlp/yt-dlp/releases)
+- **macOS**: `brew install yt-dlp`
+- **Linux**: `sudo apt install yt-dlp` or `sudo dnf install yt-dlp`
+
+Then install Node.js dependencies:
 ```bash
 npm install
 ```
@@ -34,14 +41,18 @@ npm run dev
 
 4. **Open your browser** and go to `http://localhost:3000`
 
-### Netlify Deployment
+### Deployment
 
-1. **Connect to GitHub**: Link your repository to Netlify
-2. **Configure Build Settings**:
-   - Build command: `npm install && npm run build`
+1. **Frontend (Netlify)**:
+   - Connect your GitHub repository to Netlify
+   - Build command: `npm install`
    - Publish directory: `.`
-   - Functions directory: `netlify/functions`
-3. **Deploy**: Netlify will automatically build and deploy your site
+
+2. **Backend (Render)**:
+   - Connect your GitHub repository to Render
+   - Build command: `npm install`
+   - Start command: `node server.js`
+   - Environment: Node.js
 
 ## 🎮 How to Use
 
@@ -74,7 +85,7 @@ npm run dev
 - **Frontend**: Vanilla JavaScript with modern ES6+ features
 - **Storage**: IndexedDB for local music and playlist storage
 - **Audio Processing**: Web Audio API for visualization and playback
-- **Backend**: Netlify serverless functions for YouTube conversion
+- **Backend**: Node.js server on Render for API functionality
 - **Styling**: Pure CSS with custom properties and animations
 
 ### Browser Support
@@ -87,17 +98,14 @@ npm run dev
 ### File Structure
 
 ```
-├── netlify/
-│   └── functions/
-│       └── api.js          # Serverless functions
-├── assets/                 # Static assets
-├── index.html             # Main HTML file
-├── script.js              # Main application logic
-├── input-handler.js       # Input handling
-├── context-menu.js        # Context menu functionality
-├── styles.css             # All styles
-├── server.js              # Local development server
-└── netlify.toml           # Netlify configuration
+├── assets/                # Static assets
+├── index.html            # Main HTML file
+├── script.js             # Main application logic
+├── input-handler.js      # Input handling
+├── context-menu.js       # Context menu functionality
+├── styles.css            # All styles
+├── server.js             # Main API server
+└── netlify.toml          # Netlify frontend configuration
 ```
 
 ## 🔧 Configuration
@@ -116,10 +124,10 @@ npm run dev
 
 ### Common Issues
 
-1. **YouTube conversion fails**: Check if the video is available in your region
+1. **YouTube download fails**: Check if yt-dlp is installed and in your system PATH
 2. **Audio not playing**: Ensure your browser supports the audio format
 3. **Storage issues**: Clear browser data if IndexedDB becomes corrupted
-4. **Function timeouts**: Very long videos may not convert due to Netlify's 10-second limit
+4. **Permission errors**: Ensure you have write permissions in the temp directory
 
 ### Debug Mode
 
