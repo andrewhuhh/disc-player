@@ -3,18 +3,11 @@ services:
     name: disc-player
     env: node
     buildCommand: |
-      # Create local bin directory in project
-      mkdir -p bin
-      # Install yt-dlp
-      curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o bin/yt-dlp
-      chmod +x bin/yt-dlp
-      # Install node dependencies
+      pip3 install --no-cache-dir yt-dlp
       npm install
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 3000
     healthCheckPath: /api/health
     autoDeploy: true
