@@ -4,6 +4,14 @@ const cors = require('cors');
 const ytdl = require('@distube/ytdl-core');
 const rateLimit = require('express-rate-limit');
 
+// Optional dependencies
+let ffmpeg;
+try {
+    ffmpeg = require('fluent-ffmpeg');
+} catch (err) {
+    console.log('Optional dependency fluent-ffmpeg not available, some features may be limited');
+}
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -185,11 +193,17 @@ app.use((req, res) => {
 
 // Start server
 app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+    console.log('='.repeat(50));
+    console.log(`Record Player API Server`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`Port: ${port}`);
+    console.log(`Time: ${new Date().toISOString()}`);
+    console.log(`Node Version: ${process.version}`);
+    console.log(`Platform: ${process.platform}`);
     console.log('Available routes:');
     console.log('- GET  /');
     console.log('- GET  /health');
     console.log('- GET  /youtube-metadata/:videoId');
     console.log('- POST /youtube-convert');
+    console.log('='.repeat(50));
 });
