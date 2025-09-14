@@ -74,7 +74,39 @@ async function resolveYtDlpPath() {
         return ytdlpPath;
     } catch (error) {
         console.error('yt-dlp not found in PATH:', error.message);
-        throw new Error('yt-dlp not found. Checked environment variable YTDLP_PATH, common paths (/usr/local/bin/yt-dlp, /usr/bin/yt-dlp), and PATH. Please ensure yt-dlp is installed and accessible.');
+    }
+
+    // Final fallback: try python module execution
+    try {
+        console.log('Trying yt-dlp as Python module...');
+        // Test if python3 -m yt_dlp works
+        const testPython = spawn('python3', ['-m', 'yt_dlp', '--version']);
+        
+        const pythonWorked = await new Promise((resolve) => {
+            testPython.on('error', () => resolve(false));
+            testPython.on('close', (code) => resolve(code === 0));
+        });
+        
+        if (pythonWorked) {
+            console.log('Found yt-dlp as Python module');
+            ytdlpPath = 'python3 -m yt_dlp'; // Special marker for Python module
+            return ytdlpPath;
+        }
+    } catch (error) {
+        console.error('Python module fallback failed:', error.message);
+    }
+    
+    throw new Error('yt-dlp not found. Checked environment variable YTDLP_PATH, common paths (/usr/local/bin/yt-dlp, /usr/bin/yt-dlp), PATH, and Python module. Please ensure yt-dlp is installed and accessible.');
+}
+
+// Helper function to spawn yt-dlp with proper command handling
+function spawnYtDlp(ytdlpPath, args) {
+    if (ytdlpPath === 'python3 -m yt_dlp') {
+        // Use Python module execution
+        return spawn('python3', ['-m', 'yt_dlp', ...args]);
+    } else {
+        // Use binary execution
+        return spawn(ytdlpPath, args);
     }
 }
 
@@ -84,7 +116,7 @@ async function checkYtDlp() {
         const resolvedPath = await resolveYtDlpPath();
         
         return new Promise((resolve) => {
-            const ytdlp = spawn(resolvedPath, ['--version']);
+            const ytdlp = spawnYtDlp(resolvedPath, ['--version']);
             
             ytdlp.on('error', (err) => {
                 console.error('yt-dlp check error:', err.message);
@@ -425,7 +457,7 @@ app.post('/api/youtube-convert', youtubeDownloadLimiter, async (req, res) => {
         outputFile = path.join(tempDir, `${generateTempFilename()}.mp3`);
 
         // Download and convert using yt-dlp
-        const ytdlp = spawn(resolvedYtdlpPath, [
+        const ytdlp = spawnYtDlp(resolvedYtdlpPath, [
             '--extract-audio',
             '--audio-format', 'mp3',
             '--audio-quality', '0',  // Best quality
@@ -560,7 +592,7 @@ app.get('/api/youtube-metadata/:videoId', youtubeMetadataLimiter, async (req, re
         console.log('Attempting to fetch video info for:', url);
 
         // Get video metadata using yt-dlp
-        const ytdlp = spawn(resolvedYtdlpPath, [
+        const ytdlp = spawnYtDlp(resolvedYtdlpPath, [
             '--dump-json',
             '--no-playlist',
             url
