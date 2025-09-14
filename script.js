@@ -2669,8 +2669,16 @@ function cancelGeneration() {
         aiGenerationState.abortController.abort();
     }
     
+    // Find and remove any generating items
+    const generatingItems = document.querySelectorAll('.song-item.generating');
+    generatingItems.forEach(item => {
+        if (item._progressInterval) {
+            clearInterval(item._progressInterval);
+        }
+        removeGeneratingMusicItem(item);
+    });
+    
     aiGenerationState.isGenerating = false;
-    hideAiGenerationOverlay();
     
     // Reset button state
     generateButton.disabled = false;
@@ -2685,6 +2693,173 @@ function cancelGeneration() {
 // Handle cancel button click
 if (aiCancelButton) {
     aiCancelButton.addEventListener('click', cancelGeneration);
+}
+
+// Progressive loading functions for ElevenLabs generation (similar to YouTube approach)
+function createGeneratingMusicItem(prompt, estimatedSeconds) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'song-item loading generating';
+    wrapper.dataset.type = 'song';
+    wrapper.dataset.generating = 'true';
+    wrapper.tabIndex = -1; // Not focusable while loading
+
+    const cover = document.createElement('div');
+    cover.className = 'song-cover';
+    
+    const coverInner = document.createElement('div');
+    coverInner.className = 'song-cover-inner';
+    coverInner.style.backgroundImage = generateRandomGradient();
+    
+    const coverDot = document.createElement('div');
+    coverDot.className = 'song-cover-dot pulsing';
+    
+    // Add progress ring around the dot
+    const progressRing = document.createElement('div');
+    progressRing.className = 'generation-progress-ring';
+    progressRing.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
+            <circle cx="12" cy="12" r="10" fill="none" stroke="rgba(255,255,255,0.8)" stroke-width="2" 
+                    stroke-dasharray="62.83" stroke-dashoffset="62.83" class="progress-circle"/>
+        </svg>
+    `;
+    coverDot.appendChild(progressRing);
+    
+    coverInner.appendChild(coverDot);
+    cover.appendChild(coverInner);
+
+    const meta = document.createElement('div');
+    meta.className = 'song-meta';
+    const title = document.createElement('div');
+    title.className = 'song-title';
+    title.textContent = 'Generating Music...';
+    const artist = document.createElement('div');
+    artist.className = 'song-artist generating-status';
+    artist.textContent = 'conjuring your sonic masterpiece...';
+    meta.appendChild(title);
+    meta.appendChild(artist);
+
+    // Add estimated time
+    const timeIndicator = document.createElement('div');
+    timeIndicator.className = 'generation-time-indicator';
+    timeIndicator.textContent = `~${estimatedSeconds}s`;
+    meta.appendChild(timeIndicator);
+
+    wrapper.appendChild(cover);
+    wrapper.appendChild(meta);
+
+    // Store generation info on the element
+    wrapper._generationInfo = {
+        prompt,
+        estimatedSeconds,
+        startTime: Date.now()
+    };
+
+    // Add context menu for cancellation
+    wrapper.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Create simple context menu for cancellation
+        const existingMenu = document.querySelector('.generation-cancel-menu');
+        if (existingMenu) existingMenu.remove();
+        
+        const menu = document.createElement('div');
+        menu.className = 'generation-cancel-menu';
+        menu.style.cssText = `
+            position: fixed;
+            left: ${e.clientX}px;
+            top: ${e.clientY}px;
+            background: rgba(20, 20, 20, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            padding: 8px;
+            z-index: 10000;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.85rem;
+        `;
+        
+        const cancelOption = document.createElement('div');
+        cancelOption.textContent = '✕ Cancel Generation';
+        cancelOption.style.cssText = `
+            padding: 6px 12px;
+            cursor: pointer;
+            border-radius: 4px;
+            color: #ff6b6b;
+            transition: background 0.2s ease;
+        `;
+        
+        cancelOption.addEventListener('mouseenter', () => {
+            cancelOption.style.background = 'rgba(255, 107, 107, 0.1)';
+        });
+        cancelOption.addEventListener('mouseleave', () => {
+            cancelOption.style.background = 'transparent';
+        });
+        cancelOption.addEventListener('click', () => {
+            cancelGeneration();
+            menu.remove();
+        });
+        
+        menu.appendChild(cancelOption);
+        document.body.appendChild(menu);
+        
+        // Remove menu on outside click
+        const removeMenu = (e) => {
+            if (!menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener('click', removeMenu);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', removeMenu), 0);
+    });
+
+    return wrapper;
+}
+
+function updateGeneratingMusicItem(generatingItem, progress, message = null) {
+    if (!generatingItem || !generatingItem._generationInfo) return;
+    
+    const artist = generatingItem.querySelector('.song-artist');
+    const timeIndicator = generatingItem.querySelector('.generation-time-indicator');
+    const progressCircle = generatingItem.querySelector('.progress-circle');
+    
+    // Update progress ring
+    if (progressCircle) {
+        const circumference = 62.83; // 2π * 10
+        const offset = circumference - (progress / 100) * circumference;
+        progressCircle.style.strokeDashoffset = offset;
+    }
+    
+    // Update status message
+    if (message && artist) {
+        artist.textContent = message;
+    }
+    
+    // Update time estimate
+    if (timeIndicator) {
+        const elapsed = Math.floor((Date.now() - generatingItem._generationInfo.startTime) / 1000);
+        const remaining = Math.max(0, generatingItem._generationInfo.estimatedSeconds - elapsed);
+        if (remaining > 0) {
+            timeIndicator.textContent = `~${remaining}s`;
+        } else {
+            timeIndicator.textContent = 'almost there...';
+        }
+    }
+}
+
+function removeGeneratingMusicItem(generatingItem) {
+    if (generatingItem && generatingItem.parentNode) {
+        // Add fade out animation
+        generatingItem.style.transition = 'opacity 0.3s ease-out, transform 0.3s ease-out';
+        generatingItem.style.opacity = '0';
+        generatingItem.style.transform = 'translateX(-20px)';
+        
+        setTimeout(() => {
+            if (generatingItem.parentNode) {
+                generatingItem.parentNode.removeChild(generatingItem);
+            }
+        }, 300);
+    }
 }
 
 // Handle music generation
@@ -2719,6 +2894,8 @@ if (generateButton) {
         const length = parseInt(musicLengthSelect.value);
         const estimatedSeconds = Math.ceil(length / 1000) * 2; // 2x the audio length
         
+        let generatingMusicItem = null;
+        
         try {
             // Save API key for future use
             await saveApiKey(apiKey);
@@ -2731,12 +2908,46 @@ if (generateButton) {
             generateButton.disabled = true;
             generateButton.textContent = 'Generating...';
             
-            // Show AI generation overlay
-            showAiGenerationOverlay(estimatedSeconds);
-            startProgressTracking(estimatedSeconds);
-            
             // Close add music panel
             addMusicPanel.classList.remove('expanded');
+            
+            // Create and add generating music item immediately
+            generatingMusicItem = createGeneratingMusicItem(prompt, estimatedSeconds);
+            const songsList = document.querySelector('.songs-list');
+            const songsPanel = document.querySelector('.songs-panel');
+            
+            // Ensure songs panel is open
+            if (songsPanel && !songsPanel.classList.contains('open')) {
+                songsPanel.classList.add('open');
+                songsPanel.setAttribute('aria-hidden', 'false');
+            }
+            
+            if (songsList) {
+                songsList.appendChild(generatingMusicItem); // Add to bottom of list
+                setTimeout(() => generatingMusicItem.classList.add('animate'), 10);
+                // Scroll into view
+                generatingMusicItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+            
+            // Start progress tracking for the item
+            const progressInterval = setInterval(() => {
+                if (!generatingMusicItem) return;
+                
+                const elapsed = (Date.now() - generatingMusicItem._generationInfo.startTime) / 1000;
+                const progress = Math.min((elapsed / estimatedSeconds) * 95, 95); // Cap at 95% until complete
+                
+                // Update with different messages based on progress
+                let message = 'conjuring your sonic masterpiece...';
+                if (progress > 25) message = 'arranging the perfect harmony...';
+                if (progress > 50) message = 'fine-tuning the rhythm...';
+                if (progress > 75) message = 'adding the final touches...';
+                if (elapsed > estimatedSeconds) message = 'taking longer than expected...';
+                
+                updateGeneratingMusicItem(generatingMusicItem, progress, message);
+            }, 500);
+            
+            // Store interval for cleanup
+            generatingMusicItem._progressInterval = progressInterval;
 
             const response = await fetch('/api/generate-music', {
                 method: 'POST',
@@ -2761,9 +2972,8 @@ if (generateButton) {
                 throw error;
             }
 
-            // Complete the progress bar
-            aiProgressFill.style.width = '100%';
-            aiProgressText.textContent = 'processing audio...';
+            // Update generating item to show completion
+            updateGeneratingMusicItem(generatingMusicItem, 100, 'processing audio...');
 
             // Get the generated audio as blob
             const blob = await response.blob();
@@ -2775,10 +2985,9 @@ if (generateButton) {
             // Reset form
             musicPromptInput.value = '';
             
-            // Close songs panel if open
-            if (songsPanel && songsPanel.classList.contains('open')) {
-                songsPanel.classList.remove('open');
-                songsPanel.setAttribute('aria-hidden', 'true');
+            // Remove generating item after successful completion
+            if (generatingMusicItem) {
+                removeGeneratingMusicItem(generatingMusicItem);
             }
 
         } catch (error) {
@@ -2793,9 +3002,21 @@ if (generateButton) {
                 });
             }
         } finally {
+            // Clean up generating item
+            if (generatingMusicItem) {
+                // Clear progress interval
+                if (generatingMusicItem._progressInterval) {
+                    clearInterval(generatingMusicItem._progressInterval);
+                }
+                
+                // Remove generating item if it still exists (error case)
+                if (generatingMusicItem.parentNode) {
+                    removeGeneratingMusicItem(generatingMusicItem);
+                }
+            }
+            
             // Reset generation state
             aiGenerationState.isGenerating = false;
-            hideAiGenerationOverlay();
             
             // Reset button state
             generateButton.disabled = false;
