@@ -5,6 +5,6 @@
   "main": "api.js",
   "dependencies": {
     "@distube/ytdl-core": "^4.14.7",
-    "ytdl-core": "npm:@distube/ytdl-core@latest"
+    "node-fetch": "^2.7.0"
   }
 }

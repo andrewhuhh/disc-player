@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const ytdl = require('@distube/ytdl-core');
+const fetch = require('node-fetch');
 
 // Helper to generate safe temporary filenames
 function generateTempFilename() {
