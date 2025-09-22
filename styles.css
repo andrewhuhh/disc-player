@@ -457,13 +457,14 @@ h1, h2, h3, h4, h5, h6 {
     position: fixed;
     bottom: 90px;
     right: 24px;
-    overflow-x: visible;
+    overflow-x: hidden; /* Prevent horizontal scrollbar during transitions */
     overflow-y: hidden;
     opacity: 0;
     display: none;
     z-index: 1100;
     transform: translateX(100%);
     transition: transform 0.3s ease, opacity 0.3s ease;
+    max-width: 100vw; /* Ensure panel doesn't exceed viewport */
 }
 
 .songs-panel.open {
@@ -1102,7 +1103,6 @@ h1, h2, h3, h4, h5, h6 {
 /* Combined Add Music Panel Styles */
 .add-music-panel {
     width: 30px;
-    max-width: 75vw;
     height: 30px;
     margin: 18px;
     display: flex;
@@ -1112,30 +1112,33 @@ h1, h2, h3, h4, h5, h6 {
     border-radius: 8px;
     background: rgba(255,255,255,0.1);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     z-index: 100;
+    transform-origin: center right;
+    overflow: hidden;
 }
 
 .add-music-panel.expanded {
-    width: 320px;
+    width: min(320px, calc(100vw - 48px)); /* Responsive width with viewport constraint */
     height: auto;
     background: rgba(30, 30, 30, 0.95);
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255,255,255,0.1);
     flex-direction: column;
     align-items: stretch;
-    z-index: 1000;
+    z-index: 1200; /* Higher than parent songs-panel (1100) */
+    transform: scale(1); /* Ensure no scaling artifacts */
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); /* Add depth */
 }
 
-.add-music-panel:hover {
+.add-music-panel:hover:not(.expanded) {
     background: rgba(255,255,255,0.18);
-    scale: 1.05;
-    transform-origin: center right;
+    transform: scale(1.05);
 }
 
 .add-music-panel.expanded:hover {
-    scale: 1;
+    transform: scale(1);
     background: rgba(30, 30, 30, 0.95);
 }
 
@@ -1149,25 +1152,56 @@ h1, h2, h3, h4, h5, h6 {
     font-weight: bold;
     opacity: 0.6;
     transition: all 0.2s ease;
+    transform: rotate(0deg);
 }
 
-.add-music-panel:hover .add-music-button {
+.add-music-panel:hover:not(.expanded) .add-music-button {
     opacity: 1;
-    transform: scale(1.1);
+    transform: scale(1.1) rotate(90deg); /* Subtle rotation on hover */
 }
 
 .add-music-content {
     display: none;
     width: 100%;
     flex-direction: column;
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity 0.2s ease 0.1s, transform 0.2s ease 0.1s; /* Delayed fade-in */
 }
 
 .add-music-panel.expanded .add-music-button {
-    display: none;
+    opacity: 0;
+    transform: scale(0.8) rotate(45deg);
+    pointer-events: none;
+    transition: all 0.15s ease;
 }
 
 .add-music-panel.expanded .add-music-content {
     display: flex;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Smooth transition class for preventing layout jumps */
+.add-music-panel.transitioning {
+    will-change: width, height, transform;
+}
+
+/* Ensure content doesn't overflow during transition */
+.add-music-panel.transitioning .add-music-content {
+    overflow: hidden;
+}
+
+/* Media queries for smaller screens */
+@media (max-width: 400px) {
+    .add-music-panel.expanded {
+        width: calc(100vw - 36px); /* Even more conservative on very small screens */
+        margin: 18px 18px 18px 0; /* Adjust margins to prevent overflow */
+    }
+    
+    .songs-panel {
+        right: 18px; /* Reduce right margin on small screens */
+    }
 }
 
 .add-music-tabs {
