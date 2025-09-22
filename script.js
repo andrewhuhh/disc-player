@@ -1052,18 +1052,6 @@ async function processAudioFile(file, initialMetadata = null) {
 
         // If no embedded cover, try to fetch thumbnail provided by caller
         if (!mergedMetadata.coverBlob && initialMetadata?.thumbnail) {
-            try {
-                const apiBaseUrl = window.inputHandler?.getApiBaseUrl() || 'http://localhost:3000';
-                const resp = await fetch(`${apiBaseUrl}/api/proxy-thumbnail?url=${encodeURIComponent(initialMetadata.thumbnail)}`);
-                if (resp.ok) {
-                    const blob = await resp.blob();
-                    mergedMetadata.coverBlob = blob;
-                    mergedMetadata.coverUrl = URL.createObjectURL(blob);
-                }
-            } catch (e) {
-                console.warn('Failed to fetch thumbnail:', e);
-                // ignore thumbnail fetch errors; continue without cover
-            }
         }
 
         // Generate a permanent gradient if no cover art
@@ -2333,12 +2321,6 @@ async function loadSong(recordItem, shouldPlay = true) {
     }
 }
 
-// Import the InputHandler class
-import InputHandler from './input-handler.js';
-
-// Initialize the input handler (but don't set up its default event listeners)
-const inputHandler = new InputHandler();
-// We'll handle the UI interactions ourselves with the new combined interface
 
 // Import the ContextMenu class
 import ContextMenu from './context-menu.js';
@@ -2376,10 +2358,6 @@ async function ensurePlaylistContextMenu() {
 // Combined add music functionality
 const addMusicPanel = document.querySelector('.add-music-panel');
 const addMusicContent = document.querySelector('.add-music-content');
-const tabButtons = document.querySelectorAll('.tab-button');
-const tabContents = document.querySelectorAll('.tab-content');
-const addSongInput = document.getElementById('add-song-url');
-const addSongSubmitButton = document.getElementById('add-song-submit');
 const musicPromptInput = document.getElementById('music-prompt');
 const musicLengthSelect = document.getElementById('music-length');
 const generateButton = document.getElementById('generate-button');
@@ -2416,9 +2394,8 @@ if (addMusicPanel) {
             if (!isExpanded) {
                 addMusicPanel.classList.add('expanded');
                 await loadSavedApiKey();
-                // Focus first input of active tab
-                const activeTab = document.querySelector('.tab-content.active');
-                const firstInput = activeTab.querySelector('input, textarea');
+                // Focus first input of AI form
+                const firstInput = document.querySelector('.ai-generation-form input, .ai-generation-form textarea');
                 if (firstInput) firstInput.focus();
             } else {
                 addMusicPanel.classList.remove('expanded');
@@ -2434,28 +2411,6 @@ if (addMusicContent) {
     });
 }
 
-// Handle tab switching
-tabButtons.forEach(button => {
-    button.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const targetTab = button.dataset.tab;
-        
-        // Update active tab button
-        tabButtons.forEach(btn => btn.classList.remove('active'));
-        button.classList.add('active');
-        
-        // Update active tab content
-        tabContents.forEach(content => {
-            content.classList.remove('active');
-            if (content.classList.contains(`${targetTab}-tab`)) {
-                content.classList.add('active');
-                // Focus first input of newly active tab
-                const firstInput = content.querySelector('input, textarea');
-                if (firstInput) firstInput.focus();
-            }
-        });
-    });
-});
 
 // Save API key when user types
 if (apiKeyInput) {
@@ -2467,61 +2422,7 @@ if (apiKeyInput) {
     });
 }
 
-// Handle YouTube/URL submission
-if (addSongSubmitButton) {
-    addSongSubmitButton.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const url = addSongInput.value.trim();
-        if (!url) {
-            errorHandler.showWarning('Please enter a YouTube or audio URL.', {
-                title: 'Input Required',
-                duration: 4000
-            });
-            addSongInput.focus();
-            return;
-        }
 
-        try {
-            // Use the existing input handler functionality
-            if (inputHandler) {
-                if (inputHandler.isYouTubeUrl(url)) {
-                    await inputHandler.handleYouTubeUrl(url);
-                } else {
-                    await inputHandler.handleDirectAudioUrl(url);
-                }
-                
-                // Clear input and close panel
-                addSongInput.value = '';
-                addMusicPanel.classList.remove('expanded');
-                
-                // Close songs panel if open
-                if (songsPanel && songsPanel.classList.contains('open')) {
-                    songsPanel.classList.remove('open');
-                    songsPanel.setAttribute('aria-hidden', 'true');
-                }
-            }
-        } catch (error) {
-            console.error('Error processing URL:', error);
-            errorHandler.showError('Failed to process the URL. Please make sure it\'s a valid audio file link.', {
-                title: 'URL Processing Failed',
-                duration: 6000
-            });
-        }
-    });
-}
-
-// Handle Enter key in URL input
-if (addSongInput) {
-    addSongInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            addSongSubmitButton.click();
-        } else if (e.key === 'Escape') {
-            addSongInput.value = '';
-            addMusicPanel.classList.remove('expanded');
-        }
-    });
-}
 
 // Handle keyboard shortcuts for music generation
 if (musicPromptInput) {

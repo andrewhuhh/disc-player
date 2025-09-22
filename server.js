@@ -1,10 +1,8 @@
 const express = require('express');
-const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const cors = require('cors');
-const which = require('which');
 require('dotenv').config();
 
 // Rate limiting setup
@@ -12,165 +10,9 @@ const rateLimit = require('express-rate-limit');
 const RedisStore = require('rate-limit-redis');
 const Redis = require('ioredis');
 
-// Optional dependencies for local development
-let ffmpeg, ffmpegPath, NodeID3;
-try {
-    ffmpeg = require('fluent-ffmpeg');
-    ffmpegPath = require('ffmpeg-static');
-    NodeID3 = require('node-id3');
-} catch (error) {
-    console.warn('Optional dependencies not available for local development:', error.message);
-}
-
 const app = express();
 const port = process.env.PORT || 3000;
 const isProduction = process.env.NODE_ENV === 'production';
-
-// Cache for resolved yt-dlp path
-let ytdlpPath = null;
-
-// Helper function to resolve yt-dlp path with fallback logic
-async function resolveYtDlpPath() {
-    // Return cached path if available
-    if (ytdlpPath) {
-        return ytdlpPath;
-    }
-
-    // Check environment variable first (highest priority)
-    if (process.env.YTDLP_PATH) {
-        console.log('Using yt-dlp path from environment variable:', process.env.YTDLP_PATH);
-        try {
-            if (fs.existsSync(process.env.YTDLP_PATH)) {
-                ytdlpPath = process.env.YTDLP_PATH;
-                return ytdlpPath;
-            } else {
-                console.warn('Environment variable YTDLP_PATH points to non-existent file:', process.env.YTDLP_PATH);
-            }
-        } catch (error) {
-            console.warn('Error checking YTDLP_PATH environment variable:', error.message);
-        }
-    }
-
-    // Common installation paths to check based on platform
-    const isWindows = process.platform === 'win32';
-    const commonPaths = isWindows 
-        ? [
-            path.join(process.env.APPDATA || '', 'Python', 'Python312', 'Scripts', 'yt-dlp.exe'),
-            path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'Scripts', 'yt-dlp.exe'),
-            'C:\\Python312\\Scripts\\yt-dlp.exe'
-        ]
-        : ['/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp'];
-    
-    for (const commonPath of commonPaths) {
-        try {
-            if (fs.existsSync(commonPath)) {
-                console.log('Found yt-dlp at common path:', commonPath);
-                ytdlpPath = commonPath;
-                return ytdlpPath;
-            }
-        } catch (error) {
-            console.warn('Error checking common path', commonPath, ':', error.message);
-        }
-    }
-
-    // Fallback to PATH lookup using which
-    try {
-        const resolvedPath = await which('yt-dlp');
-        console.log('Found yt-dlp in PATH:', resolvedPath);
-        ytdlpPath = resolvedPath;
-        return ytdlpPath;
-    } catch (error) {
-        console.error('yt-dlp not found in PATH:', error.message);
-    }
-
-    // Final fallback: try python module execution
-    try {
-        console.log('Trying yt-dlp as Python module...');
-        // Test if python/python3 -m yt_dlp works
-        const pythonCommands = process.platform === 'win32' 
-            ? ['python', 'py'] 
-            : ['python3', 'python'];
-
-        for (const cmd of pythonCommands) {
-            try {
-                console.log(`Trying Python command: ${cmd}`);
-                const testPython = spawn(cmd, ['-m', 'yt_dlp', '--version']);
-                
-                const pythonWorked = await new Promise((resolve) => {
-                    let output = '';
-                    testPython.stdout.on('data', (data) => {
-                        output += data;
-                    });
-                    testPython.stderr.on('data', (data) => {
-                        console.log(`${cmd} stderr:`, data.toString());
-                    });
-                    testPython.on('error', (err) => {
-                        console.log(`${cmd} error:`, err.message);
-                        resolve(false);
-                    });
-                    testPython.on('close', (code) => {
-                        console.log(`${cmd} exit code:`, code);
-                        console.log(`${cmd} output:`, output);
-                        resolve(code === 0);
-                    });
-                });
-                
-                if (pythonWorked) {
-                    console.log(`Found yt-dlp as Python module using ${cmd}`);
-                    ytdlpPath = `${cmd} -m yt_dlp`; // Special marker for Python module
-                    return ytdlpPath;
-                }
-            } catch (cmdError) {
-                console.log(`Failed to execute ${cmd}:`, cmdError.message);
-            }
-        }
-        throw new Error('No Python command succeeded');
-    } catch (error) {
-        console.error('Python module fallback failed:', error.message);
-    }
-    
-    throw new Error('yt-dlp not found. Checked environment variable YTDLP_PATH, common paths (/usr/local/bin/yt-dlp, /usr/bin/yt-dlp), PATH, and Python module. Please ensure yt-dlp is installed and accessible.');
-}
-
-// Helper function to spawn yt-dlp with proper command handling
-function spawnYtDlp(ytdlpPath, args) {
-    if (ytdlpPath === 'python3 -m yt_dlp') {
-        // Use Python module execution
-        return spawn('python3', ['-m', 'yt_dlp', ...args]);
-    } else {
-        // Use binary execution
-        return spawn(ytdlpPath, args);
-    }
-}
-
-// Helper function to check if yt-dlp is installed and working
-async function checkYtDlp() {
-    try {
-        const resolvedPath = await resolveYtDlpPath();
-        
-        return new Promise((resolve) => {
-            const ytdlp = spawnYtDlp(resolvedPath, ['--version']);
-            
-            ytdlp.on('error', (err) => {
-                console.error('yt-dlp check error:', err.message);
-                resolve(false);
-            });
-            
-            ytdlp.on('close', (code) => {
-                if (code === 0) {
-                    console.log('yt-dlp is available at:', resolvedPath);
-                    resolve(true);
-                } else {
-                    console.error('yt-dlp check failed with code:', code);
-                    resolve(false);
-                }
-            });
-        });
-    } catch (error) {
-        console.error('yt-dlp path resolution failed:', error.message);
-        return false;
-    }
-}
 
 // Configure CORS based on environment
 const corsOptions = {
@@ -189,7 +31,7 @@ if (process.env.REDIS_URL) {
     redisClient.on('error', (err) => console.warn('Redis error:', err));
 }
 
-// Configure rate limiters
+// Configure rate limiter factory
 const createLimiter = (windowMs, max, keyPrefix) => {
     const config = {
         windowMs,
@@ -197,9 +39,7 @@ const createLimiter = (windowMs, max, keyPrefix) => {
         standardHeaders: true,
         legacyHeaders: false,
         keyGenerator: (req, res, next) => {
-            // Use express-rate-limit's built-in IP key generator
             const ip = rateLimit.ipKeyGenerator(req, res, next);
-            // Add optional API key to the key
             const apiKey = req.headers['x-api-key'] || '';
             return `${keyPrefix}:${ip}:${apiKey}`;
         },
@@ -212,7 +52,6 @@ const createLimiter = (windowMs, max, keyPrefix) => {
         }
     };
 
-    // Use Redis store if available
     if (redisClient) {
         config.store = new RedisStore({
             sendCommand: (...args) => redisClient.call(...args),
@@ -230,19 +69,6 @@ app.use(createLimiter(
     'global'
 ));
 
-// YouTube-specific rate limits
-const youtubeMetadataLimiter = createLimiter(
-    60 * 1000,  // 1 minute window
-    30,         // 30 requests per window
-    'yt_meta'
-);
-
-const youtubeDownloadLimiter = createLimiter(
-    5 * 60 * 1000,  // 5 minute window
-    15,             // 15 requests per window
-    'yt_dl'
-);
-
 // Root API info endpoint
 app.get('/api/', (req, res) => {
     res.json({ 
@@ -250,12 +76,9 @@ app.get('/api/', (req, res) => {
         service: 'Record Player API',
         version: '1.0.0',
         endpoints: [
-            '/api/youtube-metadata/:videoId',
-            '/api/youtube-convert',
             '/api/generate-music',
             '/api/generate-cover-image',
             '/api/generate-song-metadata',
-            '/api/proxy-audio',
             '/api/health'
         ]
     });
@@ -264,18 +87,12 @@ app.get('/api/', (req, res) => {
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
     try {
-        // Check if yt-dlp is installed and working
-        const isYtDlpInstalled = await checkYtDlp();
-        
         res.json({ 
-            status: isYtDlpInstalled ? 'ok' : 'degraded',
+            status: 'ok',
             timestamp: new Date().toISOString(),
             environment: isProduction ? 'production' : 'development',
             node_version: process.version,
-            platform: process.platform,
-            features: {
-                ytdlp: isYtDlpInstalled ? 'available' : 'unavailable'
-            }
+            platform: process.platform
         });
     } catch (error) {
         res.status(500).json({
@@ -291,8 +108,8 @@ app.get('/api/health', async (req, res) => {
 if (isProduction) {
     const helmet = require('helmet');
     app.use(helmet({
-        contentSecurityPolicy: false, // Disabled because we need to load external resources
-        crossOriginEmbedderPolicy: false // Disabled for audio file handling
+        contentSecurityPolicy: false,
+        crossOriginEmbedderPolicy: false
     }));
 }
 
@@ -311,12 +128,10 @@ if (!fs.existsSync(tempDir)) {
 // Clean up temp files older than 1 hour
 cleanupTempFiles();
 
-// Helper to generate safe temporary filenames
 function generateTempFilename() {
     return crypto.randomBytes(16).toString('hex');
 }
 
-// Clean up temp files older than 1 hour
 function cleanupTempFiles() {
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
     fs.readdir(tempDir, (err, files) => {
@@ -333,10 +148,7 @@ function cleanupTempFiles() {
     });
 }
 
-// Run cleanup every hour
 setInterval(cleanupTempFiles, 60 * 60 * 1000);
-
-// Note: yt-dlp check removed as we're now using ytdl-core and ffmpeg for YouTube conversion
 
 // Music generation endpoint
 app.post('/api/generate-music', async (req, res) => {
@@ -361,18 +173,15 @@ app.post('/api/generate-music', async (req, res) => {
 
         console.log('Generating music with prompt:', prompt);
         
-        // Generate music using ElevenLabs API
         const track = await elevenlabs.music.compose({
             prompt: prompt,
             musicLengthMs: parseInt(length),
         });
 
-        // Log the full response from ElevenLabs API
         console.log('ElevenLabs API Response Type:', typeof track);
 
-        // Convert ReadableStream to Buffer if needed
         let audioData;
-        if (track instanceof ReadableStream) {
+        if (typeof ReadableStream !== 'undefined' && track instanceof ReadableStream) {
             console.log('Converting ReadableStream to audio data...');
             const reader = track.getReader();
             const chunks = [];
@@ -392,7 +201,6 @@ app.post('/api/generate-music', async (req, res) => {
             console.log(`Total chunks received: ${chunks.length}`);
             console.log(`Total audio data size: ${totalBytes} bytes`);
             
-            // Combine chunks into a single Uint8Array
             const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             audioData = new Uint8Array(totalLength);
             let offset = 0;
@@ -410,37 +218,30 @@ app.post('/api/generate-music', async (req, res) => {
             console.log(`Audio data length: ${audioData?.length || 'unknown'}`);
         }
 
-        // Write the audio data to a file
         fs.writeFileSync(outputFile, audioData);
 
-        // Check if file exists and has size
         if (!fs.existsSync(outputFile) || fs.statSync(outputFile).size === 0) {
             throw new Error('Music generation produced no output file');
         }
 
-        // Set proper headers
         res.setHeader('Content-Type', 'audio/mpeg');
         res.setHeader('Content-Disposition', 'attachment; filename="generated-music.mp3"');
 
-        // Send the file
         res.sendFile(outputFile, (err) => {
             if (err) {
                 console.error('Error sending file:', err);
             }
-            // Clean up the temp file after sending
             fs.unlink(outputFile, () => {});
         });
 
     } catch (error) {
         console.error('Music generation error:', error);
         
-        // Parse ElevenLabs specific errors
         let errorResponse = {
             error: error.message || 'Music generation failed',
             type: 'generic'
         };
         
-        // Handle ElevenLabs API errors
         if (error.statusCode) {
             errorResponse.statusCode = error.statusCode;
             
@@ -449,369 +250,18 @@ app.post('/api/generate-music', async (req, res) => {
                 errorResponse.type = detail.status || 'api_error';
                 errorResponse.message = detail.message || error.message;
                 
-                // Include prompt suggestion if available
                 if (detail.data && detail.data.prompt_suggestion) {
                     errorResponse.promptSuggestion = detail.data.prompt_suggestion;
                 }
             }
         }
         
-        // Set appropriate status code
         const statusCode = error.statusCode || 500;
         res.status(statusCode).json(errorResponse);
         
-        // Clean up on error
         if (fs.existsSync(outputFile)) {
             fs.unlink(outputFile, () => {});
         }
-    }
-});
-
-app.post('/api/youtube-convert', youtubeDownloadLimiter, async (req, res) => {
-    const { url } = req.body;
-    if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
-    }
-
-    let outputFile;
-
-    try {
-        // Check if yt-dlp is installed
-        const isYtDlpInstalled = await checkYtDlp();
-        if (!isYtDlpInstalled) {
-            throw new Error('yt-dlp is not installed or not accessible');
-        }
-
-        // Get resolved yt-dlp path
-        const resolvedYtdlpPath = await resolveYtDlpPath();
-        console.log('Starting YouTube download for URL:', url);
-        
-        // Generate output filename
-        outputFile = path.join(tempDir, `${generateTempFilename()}.mp3`);
-
-        // Download and convert using yt-dlp
-        const ytdlp = spawnYtDlp(resolvedYtdlpPath, [
-            '--extract-audio',
-            '--audio-format', 'mp3',
-            '--audio-quality', '0',  // Best quality
-            '--embed-metadata',      // Include video metadata
-            '--no-playlist',         // Single video only
-            '--output', outputFile,
-            url
-        ]);
-
-        let errorOutput = '';
-        ytdlp.stderr.on('data', (data) => {
-            errorOutput += data;
-            console.log('yt-dlp progress:', data.toString());
-        });
-
-        const exitCode = await new Promise((resolve) => {
-            ytdlp.on('close', resolve);
-        });
-
-        if (exitCode !== 0) {
-            throw new Error(errorOutput || 'Failed to download and convert video');
-        }
-
-        // Check if file exists and has size
-        if (!fs.existsSync(outputFile) || fs.statSync(outputFile).size === 0) {
-            throw new Error('Download produced no output file');
-        }
-
-        // Get metadata from the downloaded file
-        const metadata = await new Promise((resolve, reject) => {
-            ffmpeg.ffprobe(outputFile, (err, data) => {
-                if (err) {
-                    console.warn('Failed to read metadata:', err);
-                    resolve({
-                        title: 'Unknown Title',
-                        artist: 'Unknown Artist'
-                    });
-                    return;
-                }
-
-                const tags = data.format.tags || {};
-                resolve({
-                    title: tags.title || 'Unknown Title',
-                    artist: tags.artist || tags.ARTIST || 'Unknown Artist'
-                });
-            });
-        });
-
-        // Set proper headers with metadata
-        const safeTitle = metadata.title.replace(/[^\w\s-]/g, '').trim();
-        const safeArtist = metadata.artist.replace(/[^\w\s-]/g, '').trim();
-        const filename = `${safeArtist} - ${safeTitle}.mp3`.substring(0, 200);
-
-        res.setHeader('Content-Type', 'audio/mpeg');
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.setHeader('X-Video-Title', metadata.title);
-        res.setHeader('X-Video-Artist', metadata.artist);
-
-        // Send the file
-        res.sendFile(outputFile, (err) => {
-            if (err) {
-                console.error('Error sending file:', err);
-            }
-            // Clean up the temp file after sending
-            fs.unlink(outputFile, () => {});
-        });
-
-    } catch (error) {
-        console.error('YouTube download error:', error);
-        
-        let errorResponse = {
-            error: 'Download failed',
-            type: 'download_error'
-        };
-
-        let statusCode = 500;
-
-        if (error.message.includes('yt-dlp is not installed')) {
-            errorResponse.error = 'Server configuration error: yt-dlp is not installed';
-            errorResponse.type = 'server_config';
-            statusCode = 503;
-        } else if (error.message.includes('Private video')) {
-            errorResponse.error = 'Video is private';
-            errorResponse.type = 'private_video';
-            statusCode = 403;
-        } else if (error.message.includes('Video unavailable')) {
-            errorResponse.error = 'Video is unavailable';
-            errorResponse.type = 'video_unavailable';
-            statusCode = 404;
-        } else if (error.message.includes('copyright')) {
-            errorResponse.error = 'Video is not available due to copyright restrictions';
-            errorResponse.type = 'copyright_restriction';
-            statusCode = 451;
-        } else if (error.message.includes('Sign in')) {
-            errorResponse.error = 'Video requires authentication';
-            errorResponse.type = 'auth_required';
-            statusCode = 401;
-        }
-
-        // Add debug details in development
-        if (!isProduction) {
-            errorResponse.details = error.message;
-        }
-
-        res.status(statusCode).json(errorResponse);
-        
-        // Clean up on error
-        if (fs.existsSync(outputFile)) {
-            fs.unlink(outputFile, () => {});
-        }
-    }
-});
-
-// Get YouTube video metadata
-app.get('/api/youtube-metadata/:videoId', youtubeMetadataLimiter, async (req, res) => {
-    const { videoId } = req.params;
-    
-    if (!videoId || videoId === 'unknown') {
-        return res.status(400).json({ error: 'Valid video ID is required' });
-    }
-
-    try {
-        // Check if yt-dlp is installed
-        const isYtDlpInstalled = await checkYtDlp();
-        if (!isYtDlpInstalled) {
-            throw new Error('yt-dlp is not installed or not accessible');
-        }
-
-        // Get resolved yt-dlp path
-        const resolvedYtdlpPath = await resolveYtDlpPath();
-        const url = `https://www.youtube.com/watch?v=${videoId}`;
-        console.log('Attempting to fetch video info for:', url);
-
-        // Get video metadata using yt-dlp
-        const ytdlp = spawnYtDlp(resolvedYtdlpPath, [
-            '--dump-json',
-            '--no-playlist',
-            url
-        ]);
-
-        let jsonData = '';
-        let errorOutput = '';
-
-        ytdlp.stdout.on('data', (data) => {
-            jsonData += data;
-        });
-
-        ytdlp.stderr.on('data', (data) => {
-            errorOutput += data;
-        });
-
-        const exitCode = await new Promise((resolve) => {
-            ytdlp.on('close', resolve);
-        });
-
-        if (exitCode !== 0) {
-            throw new Error(errorOutput || 'Failed to fetch video metadata');
-        }
-
-        const videoDetails = JSON.parse(jsonData);
-        
-        // Extract metadata
-        const metadata = {
-            title: videoDetails.title || 'Unknown Title',
-            author: videoDetails.uploader || videoDetails.channel || 'Unknown Artist',
-            duration: parseInt(videoDetails.duration) || 0,
-            thumbnail: videoDetails.thumbnail || null,
-            description: videoDetails.description || '',
-            uploadDate: videoDetails.upload_date || null,
-            viewCount: parseInt(videoDetails.view_count) || 0
-        };
-
-        res.json(metadata);
-
-    } catch (error) {
-        console.error('YouTube metadata error:', error);
-        
-        let errorMessage = 'Failed to fetch video metadata';
-        let statusCode = 500;
-
-        if (error.message.includes('yt-dlp is not installed')) {
-            errorMessage = 'Server configuration error: yt-dlp is not installed';
-            statusCode = 503;
-        } else if (error.message.includes('Private video')) {
-            errorMessage = 'Video is private';
-            statusCode = 403;
-        } else if (error.message.includes('Video unavailable')) {
-            errorMessage = 'Video is unavailable';
-            statusCode = 404;
-        } else if (error.message.includes('copyright')) {
-            errorMessage = 'Video is not available due to copyright restrictions';
-            statusCode = 451;
-        }
-
-        res.status(statusCode).json({ 
-            error: errorMessage,
-            details: isProduction ? undefined : error.message
-        });
-    }
-});
-
-// Proxy YouTube thumbnails
-app.get('/api/proxy-thumbnail', async (req, res) => {
-    const { url } = req.query;
-    
-    if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
-    }
-
-    try {
-        // Validate that it's a YouTube thumbnail URL
-        if (!url.includes('ytimg.com')) {
-            return res.status(400).json({ error: 'Not a valid YouTube thumbnail URL' });
-        }
-
-        console.log('Fetching thumbnail:', url);
-
-        // Try different thumbnail formats
-        const formats = [
-            url,
-            url.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg'), // Try jpg version
-            url.replace('maxresdefault', 'hqdefault') // Try lower resolution
-        ];
-
-        let response;
-        let error;
-
-        for (const format of formats) {
-            try {
-                console.log('Trying format:', format);
-                response = await fetch(format, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                    }
-                });
-
-                if (response.ok) {
-                    console.log('Successfully fetched format:', format);
-                    break;
-                }
-                
-                console.log('Format failed with status:', response.status);
-                error = new Error(`Failed to fetch thumbnail: ${response.status} ${response.statusText}`);
-            } catch (e) {
-                console.log('Format fetch error:', e.message);
-                error = e;
-            }
-        }
-
-        if (!response?.ok) {
-            throw error || new Error('Failed to fetch thumbnail in any format');
-        }
-
-        // Get the image data as a buffer
-        const imageBuffer = await response.arrayBuffer();
-        
-        // Set appropriate headers
-        res.setHeader('Content-Type', response.headers.get('content-type') || 'image/jpeg');
-        res.setHeader('Content-Length', Buffer.byteLength(imageBuffer));
-        res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
-        
-        // Send the buffer
-        res.send(Buffer.from(imageBuffer));
-
-    } catch (error) {
-        console.error('Thumbnail proxy error:', error);
-        res.status(500).json({ 
-            error: error.message || 'Failed to fetch thumbnail',
-            details: isProduction ? undefined : error.message
-        });
-    }
-});
-
-// Proxy audio files (for direct audio URL handling)
-app.post('/api/proxy-audio', async (req, res) => {
-    const { url } = req.body;
-    
-    if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
-    }
-
-    try {
-        // Validate that it's an audio URL
-        const audioExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.wma'];
-        const isAudioUrl = audioExtensions.some(ext => url.toLowerCase().includes(ext)) || 
-                          url.includes('audio') || 
-                          url.includes('sound');
-
-        if (!isAudioUrl) {
-            return res.status(400).json({ error: 'URL does not appear to be an audio file' });
-        }
-
-        // Fetch the audio file
-        const response = await fetch(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch audio: ${response.status} ${response.statusText}`);
-        }
-
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.startsWith('audio/')) {
-            throw new Error('URL does not return an audio file');
-        }
-
-        // Set appropriate headers
-        res.setHeader('Content-Type', contentType);
-        res.setHeader('Content-Length', response.headers.get('content-length') || '');
-        
-        // Stream the audio data
-        response.body.pipe(res);
-
-    } catch (error) {
-        console.error('Audio proxy error:', error);
-        res.status(500).json({ 
-            error: error.message || 'Failed to fetch audio file',
-            details: isProduction ? undefined : error.message
-        });
     }
 });
 
@@ -824,7 +274,6 @@ app.post('/api/generate-song-metadata', async (req, res) => {
     }
 
     try {
-        // Construct a system prompt that encourages JSON response
         const systemPrompt = `Based on this music description, generate a creative song title and artist name. Return ONLY a JSON object with "title" and "author" fields, nothing else. Make the title catchy and the artist name creative but believable. Music description: "${prompt}"`;
 
         const response = await fetch('https://apifreellm.com/api/chat', {
@@ -850,15 +299,13 @@ app.post('/api/generate-song-metadata', async (req, res) => {
             });
         }
 
-        if (data.status !== 'success' && data.status !== 'succes') { // API has typo in success
+        if (data.status !== 'success' && data.status !== 'succes') {
             throw new Error(data.error || 'LLM API request failed');
         }
 
-        // Try to extract JSON from the response
         let metadata = { title: 'Generated Music', author: 'AI Artist' };
         
         try {
-            // Look for JSON in the response
             const jsonMatch = data.response.match(/\{[^}]*"title"[^}]*"author"[^}]*\}/i) || 
                              data.response.match(/\{[^}]*"author"[^}]*"title"[^}]*\}/i);
             
@@ -869,7 +316,6 @@ app.post('/api/generate-song-metadata', async (req, res) => {
                     metadata.author = parsedJson.author.trim();
                 }
             } else {
-                // Fallback: try to parse the entire response as JSON
                 const parsedResponse = JSON.parse(data.response);
                 if (parsedResponse.title && parsedResponse.author) {
                     metadata.title = parsedResponse.title.trim();
@@ -877,7 +323,6 @@ app.post('/api/generate-song-metadata', async (req, res) => {
                 }
             }
         } catch (parseError) {
-            // If JSON parsing fails, try regex extraction
             const titleMatch = data.response.match(/"?title"?\s*:?\s*"?([^",\n]+)"?/i);
             const authorMatch = data.response.match(/"?author"?\s*:?\s*"?([^",\n]+)"?/i) ||
                               data.response.match(/"?artist"?\s*:?\s*"?([^",\n]+)"?/i);
@@ -908,13 +353,8 @@ app.post('/api/generate-cover-image', async (req, res) => {
     }
 
     try {
-        // Create image prompt based on music description
         const imagePrompt = `Album cover art for: ${prompt}. Artistic, vibrant, music-themed design`;
-        
-        // Generate random seed between 1-100
         const seed = Math.floor(Math.random() * 100) + 1;
-        
-        // Build the API URL with fixed parameters
         const apiUrl = new URL('https://image.pollinations.ai/prompt/' + encodeURIComponent(imagePrompt));
         apiUrl.searchParams.set('model', 'flux');
         apiUrl.searchParams.set('width', '240');
@@ -930,7 +370,6 @@ app.post('/api/generate-cover-image', async (req, res) => {
             throw new Error(`Image generation failed with status ${response.status}`);
         }
 
-        // Get the image data
         const imageBuffer = await response.arrayBuffer();
         
         if (!imageBuffer || imageBuffer.byteLength === 0) {
@@ -939,12 +378,10 @@ app.post('/api/generate-cover-image', async (req, res) => {
 
         console.log(`Generated cover image size: ${imageBuffer.byteLength} bytes`);
 
-        // Set proper headers for JPEG image
         res.setHeader('Content-Type', 'image/jpeg');
         res.setHeader('Content-Length', imageBuffer.byteLength);
-        res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+        res.setHeader('Cache-Control', 'public, max-age=3600');
 
-        // Send the image data
         res.send(Buffer.from(imageBuffer));
 
     } catch (error) {
@@ -960,7 +397,6 @@ app.post('/api/generate-cover-image', async (req, res) => {
 app.use((err, req, res, next) => {
     console.error('Unhandled error:', err);
     
-    // Don't expose error details in production
     const errorMessage = isProduction 
         ? 'An internal server error occurred'
         : err.message || 'Unknown error';
@@ -983,4 +419,4 @@ app.use((req, res) => {
 app.listen(port, () => {
     console.log(`Server running in ${isProduction ? 'production' : 'development'} mode`);
     console.log(`Listening on port ${port}`);
-}); 
+});
