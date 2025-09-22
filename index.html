@@ -28,18 +28,7 @@
         <div class="add-music-panel" role="button" tabindex="0" aria-label="Add music">
             <div class="add-music-button">+</div>
             <div class="add-music-content">
-                <div class="add-music-tabs">
-                    <button class="tab-button active" data-tab="youtube">YouTube</button>
-                    <button class="tab-button" data-tab="ai">Create</button>
-                </div>
-                
-                <div class="tab-content youtube-tab active">
-                    <input type="text" id="add-song-url" class="add-song-input" placeholder="Paste YouTube or audio link..." aria-label="Enter song link">
-                    <button id="add-song-submit" class="add-song-submit-button" type="button">Add Song</button>
-                </div>
-                
-                <div class="tab-content ai-tab">
-                    <form class="ai-generation-form">
+                <form class="ai-generation-form">
                         <div class="api-key-section">
                             <input type="password" id="elevenlabs-api-key" class="api-key-input" placeholder="Enter your ElevenLabs API key..." aria-label="ElevenLabs API key" autocomplete="off">
                             <div class="api-key-info">
@@ -57,7 +46,6 @@
                             <button id="generate-button" class="generate-button" type="button">Generate</button>
                         </div>
                     </form>
-                </div>
             </div>
         </div>
     </div>
