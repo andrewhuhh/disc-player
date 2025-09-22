@@ -2391,14 +2391,25 @@ if (addMusicPanel) {
         // Only toggle if clicking the main button, not the content
         if (e.target === addMusicPanel || e.target.classList.contains('add-music-button')) {
             const isExpanded = addMusicPanel.classList.contains('expanded');
+            
+            // Add transitioning class for smooth animations
+            addMusicPanel.classList.add('transitioning');
+            
             if (!isExpanded) {
                 addMusicPanel.classList.add('expanded');
                 await loadSavedApiKey();
-                // Focus first input of AI form
-                const firstInput = document.querySelector('.ai-generation-form input, .ai-generation-form textarea');
-                if (firstInput) firstInput.focus();
+                // Focus first input of AI form after transition completes
+                setTimeout(() => {
+                    const firstInput = document.querySelector('.ai-generation-form input, .ai-generation-form textarea');
+                    if (firstInput) firstInput.focus();
+                    addMusicPanel.classList.remove('transitioning');
+                }, 300); // Match CSS transition duration
             } else {
                 addMusicPanel.classList.remove('expanded');
+                // Remove transitioning class after animation completes
+                setTimeout(() => {
+                    addMusicPanel.classList.remove('transitioning');
+                }, 300); // Match CSS transition duration
             }
         }
     });
@@ -2432,7 +2443,14 @@ if (musicPromptInput) {
             generateButton.click();
         } else if (e.key === 'Escape') {
             musicPromptInput.value = '';
-            addMusicPanel.classList.remove('expanded');
+            // Use smooth transition when closing with Escape
+            if (addMusicPanel.classList.contains('expanded')) {
+                addMusicPanel.classList.add('transitioning');
+                addMusicPanel.classList.remove('expanded');
+                setTimeout(() => {
+                    addMusicPanel.classList.remove('transitioning');
+                }, 300);
+            }
         }
     });
 }
@@ -2442,7 +2460,12 @@ document.addEventListener('click', (e) => {
     if (addMusicPanel && addMusicPanel.classList.contains('expanded')) {
         // Check if click is outside the panel
         if (!addMusicPanel.contains(e.target)) {
+            // Use smooth transition when closing by clicking outside
+            addMusicPanel.classList.add('transitioning');
             addMusicPanel.classList.remove('expanded');
+            setTimeout(() => {
+                addMusicPanel.classList.remove('transitioning');
+            }, 300);
         }
     }
 });
