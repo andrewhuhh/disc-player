@@ -1,0 +1,57 @@
+# Netlify Configuration File
+
+# Build settings
+[build]
+  publish = "/"
+  functions = "netlify/functions"
+
+# Function settings
+[functions]
+  node_bundler = "esbuild"
+  included_files = ["**"]
+
+# Redirect API calls to Netlify Functions
+[[redirects]]
+  from = "/api/generate-music"
+  to = "/.netlify/functions/generate-music"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/generate-song-metadata"
+  to = "/.netlify/functions/generate-song-metadata"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/generate-cover-image"
+  to = "/.netlify/functions/generate-cover-image"
+  status = 200
+  force = true
+
+# Headers for static files
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+# Environment variables (can be set in Netlify UI)
+[build.environment]
+  NODE_VERSION = "20"
